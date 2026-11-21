@@ -37,3 +37,5 @@ The shared Rich console is available from `bot.core.console`.
 The Ollama client loads its signal extraction instructions from `bot/prompts/signal.md`.
 
 T02 is complete. Ollama output passes through the EMS-style signal data schema before logging. T03 still requires independent source-text verification.
+
+The Telegram worker uses the validated signal returned by the Ollama client so integer and fractional prices retain their exact decimal values.
