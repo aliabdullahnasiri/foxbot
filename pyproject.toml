@@ -9,15 +9,19 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "celery>=5.7.0",
+    "click>=8.5.1",
+    "fastapi>=0.165.0",
     "httpx>=0.28.1",
     "metatrader5>=5.0.6231 ; sys_platform == 'win32'",
     "pydantic>=2.14.4",
+    "pydantic-settings>=2.16.3",
     "python-dotenv>=1.2.4",
     "telethon>=1.46.0",
+    "uvicorn>=0.54.0",
 ]
 
 [project.scripts]
-bot = "bot:main"
+bot = "bot.core.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.13.6,<0.14.0"]
@@ -25,7 +29,17 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "black>=26.10.1",
     "pytest>=9.2.0",
     "pytest-asyncio>=1.5.0",
     "ruff>=0.17.6",
 ]
+
+[tool.pytest.ini_options]
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+include = ["src", "tests"]
+pythonVersion = "3.12"
