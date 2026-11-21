@@ -17,6 +17,7 @@ dependencies = [
     "pydantic-settings>=2.16.3",
     "python-dotenv>=1.2.4",
     "redis>=8.1.0",
+    "rich>=15.0.0",
     "telethon>=1.46.0",
     "uvicorn>=0.54.0",
 ]
