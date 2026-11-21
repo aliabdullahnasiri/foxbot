@@ -8,7 +8,7 @@ Read `PROJECT_CONTEXT.md`, `docs/REQUIREMENTS.md`, `docs/SAFETY.md`, and `tasks/
 3. Use Python 3.12, `uv`, type hints, simple modules, and clear errors.
 4. Prefer `async` for Telethon and Ollama; isolate synchronous MT5 calls behind a small adapter so they do not block the event loop.
 5. No runtime OpenAI SDK or paid AI integration; Ollama uses native HTTP with `httpx`.
-6. Do not introduce FastAPI, a database server, ORM, frontend, Docker, or unnecessary architectural layers.
+6. Do not introduce a database server, ORM, frontend, Docker, or unnecessary architectural layers.
 7. Never commit `.env`, session files, MT5 credentials, trade records, secrets, or SQLite state.
 8. Check all LLM-extracted fields against the message. LLM output is untrusted.
 9. Default to dry run and **demo-only**. Never remove hard risk limits to make an order pass.
