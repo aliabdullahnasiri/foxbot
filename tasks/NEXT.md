@@ -25,3 +25,5 @@ Pytest uses function-scoped async fixture loops, and the health test exercises t
 The Telegram monitor uses the shared logger in `bot/core/logger.py`.
 
 Queue workers require an explicit Celery broker URL. The foreground Telegram monitor can run without one.
+
+The async Redis client lives in `bot/core/redis.py`. The Redis dependency also enables Celery to use a Redis broker.
