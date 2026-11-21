@@ -4,7 +4,7 @@ from functools import partial
 import httpx
 import pytest
 
-from bot.core.ollama import OllamaError, extract_signal_json
+from bot.core.ollama import SIGNAL_PROMPT, OllamaError, extract_signal_json
 
 
 @pytest.mark.asyncio
@@ -17,6 +17,10 @@ async def test_extract_signal_json(monkeypatch, content):
         assert request.url.path == "/api/chat"
         assert payload["format"] == "json"
         assert payload["stream"] is False
+        assert payload["messages"][0] == {
+            "role": "system",
+            "content": SIGNAL_PROMPT.read_text(encoding="utf-8").strip(),
+        }
         assert payload["messages"][-1] == {"role": "user", "content": signal}
         return httpx.Response(200, json={"message": {"content": content}})
 
