@@ -8,6 +8,7 @@ from telethon import events, types, utils
 
 from bot.core import config
 from bot.core.celery import celery_app
+from bot.core.ollama import OllamaError
 from bot.core.settings import Settings
 from bot.workers.telegram import TelegramMonitorWorker
 
@@ -45,6 +46,10 @@ async def test_monitor_logs_only_fresh_candidates(client, caplog, monkeypatch):
     clock.now.side_effect = [start] + [now] * 6
     monkeypatch.setattr("bot.workers.telegram.datetime", clock)
     caplog.set_level(logging.INFO)
+    extract = AsyncMock(
+        side_effect=OllamaError("Ollama output failed signal validation.")
+    )
+    monkeypatch.setattr("bot.workers.telegram.extract_signal_json", extract)
 
     async def dispatch():
         builder = client.on.call_args.args[0]
@@ -83,6 +88,8 @@ async def test_monitor_logs_only_fresh_candidates(client, caplog, monkeypatch):
 
     client.run_until_disconnected.side_effect = dispatch
     await TelegramMonitorWorker()._run()
+    extract.assert_awaited_once_with("XAUUSD SELL 3500")
+    assert "Skipping message_id=1" in caplog.text
     candidates = [
         record.message for record in caplog.records if "candidate" in record.message
     ]
