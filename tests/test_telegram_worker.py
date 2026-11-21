@@ -50,7 +50,24 @@ async def test_monitor_logs_only_fresh_candidates(client, caplog, monkeypatch):
         builder = client.on.call_args.args[0]
         assert isinstance(builder, events.NewMessage)
         assert builder.chats == channel_id
-        assert builder.incoming
+        assert builder.incoming is None and builder.outgoing is None
+        for outgoing in (False, True):
+            assert (
+                builder.build(
+                    types.UpdateNewChannelMessage(
+                        message=types.Message(
+                            id=1,
+                            peer_id=types.PeerChannel(42),
+                            date=now,
+                            message="XAUUSD SELL 3500",
+                            out=outgoing,
+                        ),
+                        pts=1,
+                        pts_count=1,
+                    )
+                )
+                is not None
+            )
         handler = client.on.return_value.call_args.args[0]
         for message_id, chat, text, date in [
             (1, channel_id, "XAUUSD SELL 3500", now),

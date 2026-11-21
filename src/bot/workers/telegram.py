@@ -64,7 +64,7 @@ class TelegramMonitorWorker(BaseWorker):
             channel_id = utils.get_peer_id(entity)
             started_at = datetime.now(UTC)
 
-            @client.on(events.NewMessage(chats=channel_id, incoming=True))
+            @client.on(events.NewMessage(chats=channel_id))
             async def on_message(event: events.NewMessage.Event) -> None:
                 now = datetime.now(UTC)
                 if event.chat_id != channel_id or not started_at < event.date <= now:
