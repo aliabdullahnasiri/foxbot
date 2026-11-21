@@ -39,8 +39,9 @@ Expected JSON
 }
 ```
 
-Compare every extracted value against the source message. The command only
-prints the model output. FoxBot treats it as untrusted until source verification
-and domain validation are implemented.
+Compare every extracted value against the source message. The client validates the five required fields with
+`SignalData`, parses JSON numbers as exact decimals, and checks that the stop
+and every target are on the correct sides of entry. It returns the original JSON
+text after validation. Independent verification against the source is pending.
 
 [Ollama chat API](https://docs.ollama.com/api/chat)
