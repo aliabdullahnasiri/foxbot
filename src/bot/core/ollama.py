@@ -29,6 +29,17 @@ def _unique_fields(pairs: list[tuple[str, object]]) -> dict[str, object]:
 
 async def extract_signal_json(message: str) -> str:
     """Return the model's untrusted JSON text without re-encoding prices."""
+    content, _ = await _extract_signal(message)
+    return content
+
+
+async def extract_signal(message: str) -> SignalData:
+    """Return the validated extraction for logging and source verification."""
+    _, signal = await _extract_signal(message)
+    return signal
+
+
+async def _extract_signal(message: str) -> tuple[str, SignalData]:
     url = f"{settings.OLLAMA_BASE_URL.rstrip('/')}/api/chat"
     payload = {
         "model": settings.OLLAMA_MODEL,
@@ -65,8 +76,7 @@ async def extract_signal_json(message: str) -> str:
                 object_pairs_hook=_unique_fields,
             )
             if isinstance(result, dict):
-                SignalData.model_validate(result)
-                return content
+                return content, SignalData.model_validate(result)
     except ValidationError as exc:
         raise OllamaError("Ollama output failed signal validation.") from exc
     except (KeyError, TypeError, ValueError) as exc:
