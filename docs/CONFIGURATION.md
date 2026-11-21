@@ -32,7 +32,7 @@ These price limits are **example configuration values**, not proven broker-safe 
 ## Setup
 1. Install Windows MT5 terminal and sign in to a **demo** account.
 2. Install Python 3.12 and `uv`.
-3. In the project directory, run `uv sync` to install the locked runtime and development dependencies. MetaTrader 5 is installed on Windows only. Celery worker and broker setup are deferred.
+3. In the project directory, run `uv sync` to install the locked runtime and development dependencies. MetaTrader 5 is installed on Windows only.
 4. Install Ollama and pull model: `ollama pull qwen2.5:3b`.
 5. Ensure Ollama is running at configured base URL.
 6. Set Telegram API credentials and channel.
