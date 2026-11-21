@@ -15,7 +15,9 @@ Build **FoxBot**, a minimal Python 3.12 application that listens to exactly one 
 - Standard-library logging; tests with mocked integrations.
 
 ## Explicit Non-goals
-No FastAPI, web dashboard, PostgreSQL, SQLAlchemy, Redis, Celery, Docker, paid AI APIs, backtesting, pending orders, multi-account trading, multi-channel ingestion, TP2/TP3 management, auto-trading edited messages, real-account trading, or automatic strategy optimization.
+No FastAPI, web dashboard, PostgreSQL, SQLAlchemy, Redis, Docker, paid AI APIs, backtesting, pending orders, multi-account trading, multi-channel ingestion, TP2/TP3 management, auto-trading edited messages, real-account trading, or automatic strategy optimization.
+
+Celery is included as a dependency. Worker integration and broker selection are deferred.
 
 ## Technology
 Python 3.12, `uv`, Telethon, Ollama native `/api/chat` through `httpx`, Pydantic, `MetaTrader5` (Windows + terminal), `python-dotenv`, standard `logging` and `sqlite3`, pytest (dev).
