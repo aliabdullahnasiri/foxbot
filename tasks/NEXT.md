@@ -8,4 +8,4 @@ Create a Python 3.12 project with `uv`, minimal pinned/locked dependencies, `.en
 
 Run available tests and linting; report exact commands and results. Update `tasks/BACKLOG.md` when T01 is done and replace this file with the next task (T02).
 
-Progress: `.gitignore` is in place for local credentials, Telegram sessions, SQLite state, logs, and Python artifacts.
+Progress: `.gitignore` is in place for local credentials, Telegram sessions, SQLite state, logs, and Python artifacts. `.env.example` includes the documented settings and defaults to dry run.
