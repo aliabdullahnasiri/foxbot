@@ -31,3 +31,7 @@ The async Redis client lives in `bot/core/redis.py`. The Redis dependency also e
 The Telegram monitor accepts new posts from the signed-in account's other devices as well as posts from other accounts.
 
 The async Ollama client and sample extraction guide are in place. T03 still tracks independent verification of the extracted fields against the source.
+
+The shared Rich console is available from `bot.core.console`.
+
+The Ollama client loads its signal extraction instructions from `bot/prompts/signal.md`.
