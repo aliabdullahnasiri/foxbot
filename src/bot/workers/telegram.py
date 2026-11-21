@@ -7,7 +7,7 @@ from telethon import events, types, utils
 
 from bot.core import config
 from bot.core.logger import logger
-from bot.core.ollama import extract_signal_json
+from bot.core.ollama import OllamaError, extract_signal_json
 from bot.core.telegram import create_client
 from bot.workers.base import BaseWorker
 
@@ -81,7 +81,12 @@ class TelegramMonitorWorker(BaseWorker):
                         event.id,
                     )
 
-                    logger.info(signal := await extract_signal_json(text))
+                    try:
+                        signal = await extract_signal_json(text)
+                    except OllamaError as exc:
+                        logger.warning("Skipping message_id=%s: %s", event.id, exc)
+                        return
+                    logger.info("Unverified signal extraction: %s", signal)
 
             logger.info("Monitoring Telegram channel_id=%s", channel_id)
 
