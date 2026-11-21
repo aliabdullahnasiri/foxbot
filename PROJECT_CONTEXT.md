@@ -15,9 +15,11 @@ Build **FoxBot**, a minimal Python 3.12 application that listens to exactly one 
 - Standard-library logging; tests with mocked integrations.
 
 ## Explicit Non-goals
-No web dashboard, PostgreSQL, SQLAlchemy, Redis, Docker, paid AI APIs, backtesting, pending orders, multi-account trading, multi-channel ingestion, TP2/TP3 management, auto-trading edited messages, real-account trading, or automatic strategy optimization.
+No web dashboard, PostgreSQL, SQLAlchemy, Docker, paid AI APIs, backtesting, pending orders, multi-account trading, multi-channel ingestion, TP2/TP3 management, auto-trading edited messages, real-account trading, or automatic strategy optimization.
 
 The Telegram monitor is a registered Celery task and can run in the foreground without a broker. Queue workers use an explicitly configured broker.
+
+`bot/core/redis.py` exposes an async Redis client configured by `REDIS_URL`.
 
 ## Technology
 Python 3.12, `uv`, Telethon, Ollama native `/api/chat` through `httpx`, Pydantic, `MetaTrader5` (Windows + terminal), `python-dotenv`, standard `logging` and `sqlite3`, pytest (dev).
