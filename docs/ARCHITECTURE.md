@@ -33,7 +33,7 @@ Authorized Telegram channel
 - `config.py`: environment parsing and validation.
 - `telegram_listener.py`: Telethon auth, channel filter, new-message event handler.
 - `signal_parser.py`: Ollama HTTP call, strict JSON schema, original-text verification.
-- `models.py`: `Signal` Pydantic model and small result enums.
+- `bot/schemas/signal/data/signal.py`: Pydantic signal fields and price-direction validation.
 - `mt5_trader.py`: broker symbol resolution, demo checks, market quote, volume/risk, execution.
 - `state.py`: SQLite message claims, processing/outcome records, daily equity snapshot.
 - `tests/`: mock external APIs, especially MT5 and Ollama.
