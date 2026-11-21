@@ -13,6 +13,7 @@ dependencies = [
     "fastapi>=0.165.0",
     "httpx>=0.28.1",
     "metatrader5>=5.0.6231 ; sys_platform == 'win32'",
+    "mt5linux>=1.1.1",
     "pydantic>=2.14.4",
     "pydantic-settings>=2.16.3",
     "python-dotenv>=1.2.4",
