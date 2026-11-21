@@ -6,8 +6,15 @@ readme = "README.md"
 authors = [
     { name = "Ali Abdullah Nasiri", email = "105828464+aliabdullahnasiri@users.noreply.github.com" }
 ]
-requires-python = ">=3.14"
-dependencies = []
+requires-python = ">=3.12"
+dependencies = [
+    "celery>=5.7.0",
+    "httpx>=0.28.1",
+    "metatrader5>=5.0.6231 ; sys_platform == 'win32'",
+    "pydantic>=2.14.4",
+    "python-dotenv>=1.2.4",
+    "telethon>=1.46.0",
+]
 
 [project.scripts]
 bot = "bot:main"
@@ -15,3 +22,10 @@ bot = "bot:main"
 [build-system]
 requires = ["uv_build>=0.13.6,<0.14.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+    "pytest-asyncio>=1.5.0",
+    "ruff>=0.17.6",
+]
