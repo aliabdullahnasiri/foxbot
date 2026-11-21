@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     TELEGRAM_CHANNEL: str = ""
     TELEGRAM_SESSION: str = Field(default="foxbot.session", min_length=1)
     CELERY_BROKER_URL: SecretStr = SecretStr("")
+    REDIS_URL: SecretStr = SecretStr("redis://localhost:6379/0")
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "qwen2.5:3b"
     OLLAMA_TIMEOUT_SECONDS: int = Field(default=60, gt=0)
