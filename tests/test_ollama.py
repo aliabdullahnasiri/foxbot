@@ -1,10 +1,16 @@
 import json
+from decimal import Decimal
 from functools import partial
 
 import httpx
 import pytest
 
-from bot.core.ollama import SIGNAL_PROMPT, OllamaError, extract_signal_json
+from bot.core.ollama import (
+    SIGNAL_PROMPT,
+    OllamaError,
+    extract_signal,
+    extract_signal_json,
+)
 
 
 @pytest.mark.asyncio
@@ -43,6 +49,10 @@ async def test_extract_signal_json(monkeypatch, content, error):
     monkeypatch.setattr("bot.core.ollama.httpx.AsyncClient", client)
     if error is None:
         assert await extract_signal_json(signal) == content
+        extracted = await extract_signal(signal)
+        assert extracted.entry_price == Decimal("3523.0000000000000001")
+        assert isinstance(extracted.stop_loss, Decimal)
+        assert isinstance(extracted.take_profits[0], Decimal)
     else:
         with pytest.raises(OllamaError, match=error):
             await extract_signal_json(signal)
