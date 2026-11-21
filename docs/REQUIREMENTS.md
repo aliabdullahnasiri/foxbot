@@ -1,7 +1,7 @@
 # FoxBot v1 — Functional Requirements
 
 ## Dependencies
-Runtime: `telethon`, `httpx`, `pydantic`, `pydantic-settings` or `python-dotenv` (choose one simple config approach), `MetaTrader5` (on Windows). Development: `pytest`, `pytest-asyncio`, `ruff`.
+Runtime: `telethon`, `httpx`, `pydantic`, `python-dotenv`, `celery`, and `MetaTrader5` (on Windows). Development: `pytest`, `pytest-asyncio`, `ruff`.
 
 ## Telegram
 - Authenticate as a user via API ID/hash and local Telethon session; monitor authorized channel only.
