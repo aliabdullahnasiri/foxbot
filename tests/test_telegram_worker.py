@@ -49,7 +49,7 @@ async def test_monitor_logs_only_fresh_candidates(client, caplog, monkeypatch):
     extract = AsyncMock(
         side_effect=OllamaError("Ollama output failed signal validation.")
     )
-    monkeypatch.setattr("bot.workers.telegram.extract_signal_json", extract)
+    monkeypatch.setattr("bot.workers.telegram.extract_signal", extract)
 
     async def dispatch():
         builder = client.on.call_args.args[0]
