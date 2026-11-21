@@ -8,8 +8,23 @@ from bot.core.ollama import SIGNAL_PROMPT, OllamaError, extract_signal_json
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("content", ['{"entry_price": 3523.00}', "invalid", "[]"])
-async def test_extract_signal_json(monkeypatch, content):
+@pytest.mark.parametrize(
+    ("content", "error"),
+    [
+        (
+            (
+                '{"symbol":"XAUUSD","side":"SELL","entry_price":3523.0000000000000001,'
+                '"stop_loss":3540,"take_profits":[3523]}'
+            ),
+            None,
+        ),
+        ('{"entry_price":3523}', "signal validation"),
+        ('{"side":"BUY","side":"SELL"}', "valid JSON object"),
+        ("invalid", "valid JSON object"),
+        ("[]", "valid JSON object"),
+    ],
+)
+async def test_extract_signal_json(monkeypatch, content, error):
     signal = "XAUUSD SELL 3523.00"
 
     def respond(request: httpx.Request) -> httpx.Response:
@@ -26,8 +41,8 @@ async def test_extract_signal_json(monkeypatch, content):
 
     client = partial(httpx.AsyncClient, transport=httpx.MockTransport(respond))
     monkeypatch.setattr("bot.core.ollama.httpx.AsyncClient", client)
-    if content.startswith("{"):
+    if error is None:
         assert await extract_signal_json(signal) == content
     else:
-        with pytest.raises(OllamaError, match="valid JSON object"):
+        with pytest.raises(OllamaError, match=error):
             await extract_signal_json(signal)
