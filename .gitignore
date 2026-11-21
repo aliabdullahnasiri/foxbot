@@ -1,0 +1,31 @@
+# Local configuration
+.env
+.env.*
+!.env.example
+
+# Telegram sessions and SQLite state, including sidecar files
+*.session
+*.session-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-*
+
+# Logs and local trade records
+*.log
+logs/
+trade_records/
+
+# Python and development artifacts
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
