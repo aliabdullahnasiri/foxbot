@@ -18,7 +18,7 @@ Read `PROJECT_CONTEXT.md`, `docs/REQUIREMENTS.md`, `docs/SAFETY.md`, and `tasks/
 ## Commands
 ```bash
 uv sync
-uv run python main.py
+uv run bot --help
 uv run pytest
 uv run ruff check .
 ```
