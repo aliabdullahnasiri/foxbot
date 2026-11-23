@@ -1,6 +1,6 @@
 # Test Plan
 
-Manual MT5 orders use an operator-supplied lot size on the connected terminal account. Account eligibility, real-mode opt-in, and portfolio risk controls described below apply only to the planned automated workflow. Manual submission requires explicit execution, a checked broker request, and a durable request ID.
+Manual MT5 orders use an operator-supplied lot size on the connected terminal account. Account eligibility, real-mode opt-in, and portfolio risk controls described below apply only to the planned automated workflow. Manual submission requires explicit execution and a checked broker request.
 
 Use `uv run pytest` with mocked Telethon, Ollama, and MT5; tests should not require real credentials, internet, or installed terminal.
 
