@@ -27,21 +27,24 @@ class Settings(BaseSettings):
     OLLAMA_MODEL: str = "qwen2.5:3b"
     OLLAMA_TIMEOUT_SECONDS: int = Field(default=60, gt=0)
 
-    # MetaTrader 5 demo account
+    # MetaTrader 5 account
     MT5_LOGIN: int | None = Field(default=None, gt=0)
     MT5_PASSWORD: SecretStr = SecretStr("")
     MT5_SERVER: str = ""
     MT5_SYMBOL: str = "XAUUSD"
     MT5_MAGIC: int = 20261121
+    MT5_QUOTE_UTC_OFFSET_MINUTES: int = Field(default=0, ge=-840, le=840)
 
     # Trading limits and execution
     RISK_PERCENT: Decimal = Field(default=Decimal("0.5"), gt=0, le=Decimal("0.5"))
-    MAX_DAILY_LOSS_PERCENT: Decimal = Field(default=Decimal(2), gt=0, le=2)
     MAX_ENTRY_DEVIATION: Decimal = Field(default=Decimal(2), ge=0)
     MAX_SPREAD: Decimal = Field(default=Decimal("0.5"), ge=0)
     MAX_SIGNAL_AGE_SECONDS: int = Field(default=120, gt=0)
     MAX_QUOTE_AGE_SECONDS: int = Field(default=10, gt=0)
     ENABLE_TRADING: bool = False
+    ENABLE_REAL_TRADING: bool = False
+    MT5_SLIPPAGE_ALLOWANCE: Decimal | None = Field(default=None, gt=0)
+    MT5_ROUND_TRIP_COST_PER_LOT: Decimal | None = Field(default=None, ge=0)
 
     # Local state and logging
     STATE_DB_PATH: str = "foxbot_state.sqlite3"
