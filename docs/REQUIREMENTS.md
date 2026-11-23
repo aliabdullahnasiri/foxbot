@@ -1,11 +1,14 @@
 # FoxBot v1 — Functional Requirements
 
+Manual MT5 orders use an operator-supplied lot size on the connected terminal account. Account eligibility, real-mode opt-in, and portfolio risk controls described below apply only to the planned automated workflow. Manual submission requires explicit execution, a checked broker request, and a durable request ID.
+
 ## Dependencies
 
 Python 3.12 and `uv` are required. The package uses Click, FastAPI, Telethon, Celery, Redis, HTTPX, Pydantic, and `mt5linux`. The native `MetaTrader5` dependency is declared for Windows. See the manifest for the complete runtime and development dependencies. [pyproject.toml](../pyproject.toml)
 
 ## Application entry points
 
+- `uv run bot mt5-order --help` lists options for manual MT5 orders.
 - `uv run bot telegram-login` creates the local Telegram session.
 - `uv run bot telegram-monitor` runs the foreground Telegram task without a broker.
 - `uv run uvicorn bot:main --factory` serves the FastAPI liveness endpoint at `GET /health`.
@@ -28,7 +31,7 @@ The acceptance criteria below describe the target for v1. [Implementation backlo
 
 ## MT5
 - Windows terminal prerequisite; `mt5.initialize()` and `mt5.account_info()`.
-- Confirm demo account using reliable broker/terminal account mode metadata; if unclear, reject.
+- Confirm the requested account mode and identity using broker/terminal metadata. Real orders require a separately enabled manual submission on the explicitly configured account.
 - Use configured broker symbol (including suffix) and verify selection and trading constraints.
 - Market orders only; TP1 and required SL on initial order.
 - For BUY use ASK; for SELL use BID; compare executable quote to signaled entry.
@@ -36,7 +39,7 @@ The acceptance criteria below describe the target for v1. [Implementation backlo
 - Use a stable magic number and traceable comment/id for reconciliation and one-position policy.
 
 ## Risk / state
-- Risk 0.5% of current equity per signal; 2% daily-loss cap based on stored starting-day equity.
+- Maximum planned risk is 0.5% of current equity per order.
 - Compute prospective stop loss with `mt5.order_calc_profit()` and budget for likely fees/slippage; never exceed cap by lot rounding.
 - At most one FoxBot XAUUSD position at once, verify against live MT5 positions.
 - Deduplicate `(channel_id,message_id)` via SQLite with durable processing state. Avoid double order on restart or uncertain outcomes.
@@ -45,4 +48,4 @@ The acceptance criteria below describe the target for v1. [Implementation backlo
 ## Acceptance
 - Valid new Telegram signal is extracted and validated, then logged as dry run by default.
 - Only after explicit enablement, an eligible signal can submit one MT5 **demo** order with TP1 and SL.
-- No real-account orders, stale signals, unknown symbols, ambiguous parsing, over-risk positions, or duplicate submissions.
+- No automatic real-account orders, stale signals, unknown symbols, ambiguous parsing, over-risk positions, or duplicate submissions.
