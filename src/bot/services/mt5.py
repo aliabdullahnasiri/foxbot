@@ -1,11 +1,22 @@
 """Synchronous MetaTrader 5 adapter for the mt5linux bridge."""
 
+from __future__ import annotations
+
+import re
+import sqlite3
+from contextlib import closing
 from decimal import Decimal, InvalidOperation
+from hashlib import sha256
 from math import isfinite
+from time import time
 from types import TracebackType
 from typing import Any, Literal, Self
+from uuid import uuid4
 
 from mt5linux import MetaTrader5
+
+from bot.core.settings import Settings, get_settings
+from bot.schemas.mt5.data.market_order import MarketOrder
 
 
 class MT5ServiceError(RuntimeError):
@@ -13,7 +24,7 @@ class MT5ServiceError(RuntimeError):
 
 
 class MT5Service:
-    """Connect to a demo terminal and use plain Python values across RPyC."""
+    """Connect to the selected account and use plain Python values across RPyC."""
 
     def __init__(
         self,
@@ -23,12 +34,9 @@ class MT5Service:
         login: int | None = None,
         password: str | None = None,
         server: str | None = None,
-        demo_only: bool = True,
         magic: int = 123456,
         deviation: int = 20,
     ) -> None:
-        if demo_only is not True:
-            raise ValueError("FoxBot requires a demo account")
         self.host = host
         self.port = port
         self.login = login
@@ -56,7 +64,7 @@ class MT5Service:
         self.disconnect()
 
     def connect(self) -> Self:
-        """Initialize the terminal, optionally log in, and verify demo mode."""
+        """Initialize the terminal, optionally log in, with the supplied credentials."""
         if self._client is not None:
             raise MT5ServiceError("Already connected")
         if self.login is None:
@@ -73,7 +81,6 @@ class MT5Service:
                 self.login, password=self.password, server=self.server
             ):
                 raise MT5ServiceError("MT5 login failed")
-            self._verify_account()
         except BaseException as exc:
             try:
                 self.disconnect()
@@ -126,19 +133,6 @@ class MT5Service:
     def account(self) -> dict[str, Any]:
         return self._record("mt5.account_info()", "account_info")
 
-    def _verify_account(self, *, for_trading: bool = False) -> dict[str, Any]:
-        account = self.account()
-        mode = account.get("trade_mode")
-        if type(mode) is not int or mode != self.mt5.ACCOUNT_TRADE_MODE_DEMO:
-            raise MT5ServiceError("Only demo accounts are allowed")
-        if self.login is not None and account.get("login") != self.login:
-            raise MT5ServiceError("MT5 is connected to the wrong account")
-        if for_trading and not (
-            account.get("trade_allowed") is True and account.get("trade_expert") is True
-        ):
-            raise MT5ServiceError("Trading or automated trading is disabled")
-        return account
-
     def symbol_info(self, symbol: str) -> dict[str, Any]:
         """Ensure the symbol exists and is selected in Market Watch."""
         quoted_symbol = str.__repr__(symbol)
@@ -168,28 +162,9 @@ class MT5Service:
             raise MT5ServiceError(f"Invalid tick prices for {symbol}")
         return tick
 
-    def positions(self, symbol: str | None = None) -> list[dict[str, Any]]:
-        args = f"symbol={str.__repr__(symbol)}" if symbol is not None else ""
-        return self._records(f"mt5.positions_get({args})", "positions_get")
-
-    def position(self, ticket: int) -> dict[str, Any] | None:
-        matches = self._records(
-            f"mt5.positions_get(ticket={int(ticket)})", "positions_get"
-        )
-        return matches[0] if matches else None
-
-    def pending_orders(self, symbol: str | None = None) -> list[dict[str, Any]]:
-        args = f"symbol={str.__repr__(symbol)}" if symbol is not None else ""
-        return self._records(f"mt5.orders_get({args})", "orders_get")
-
-    def pending_order(self, ticket: int) -> dict[str, Any] | None:
-        matches = self._records(f"mt5.orders_get(ticket={int(ticket)})", "orders_get")
-        return matches[0] if matches else None
-
-    def history_deals(self, position_ticket: int) -> list[dict[str, Any]]:
+    def deals_between(self, start: int, end: int) -> list[dict[str, Any]]:
         return self._records(
-            f"mt5.history_deals_get(position={int(position_ticket)})",
-            "history_deals_get",
+            f"mt5.history_deals_get({int(start)}, {int(end)})", "history_deals_get"
         )
 
     def get_filling_mode(self, symbol: str) -> int:
@@ -228,198 +203,338 @@ class MT5Service:
             raise ValueError(f"volume must be a multiple of {step} lots")
         return float(lots)
 
-    def _send(self, request: dict[str, Any]) -> dict[str, Any]:
-        """Fail closed until FoxBot can enforce execution and recovery controls."""
-        raise MT5ServiceError("Order submission is unavailable in the MT5 adapter")
-
-    def order_check(self, request: dict[str, Any]) -> dict[str, Any]:
-        """Return the broker's preflight result without changing any orders."""
-        self._verify_account(for_trading=True)
-        fields = dict(request)
-        # Only built-in literals may be embedded in the remote call.
-        for key, value in fields.items():
-            if type(key) is not str or type(value) not in (str, int, float, bool):
-                raise ValueError("Order check requires string keys and scalar values")
-            if type(value) is float and not isfinite(value):
-                raise ValueError("Order check requires finite numbers")
-        result = self._eval(
-            "(lambda row: {key: value for key, value in row._asdict().items() "
-            "if key != 'request'} if row is not None else None)"
-            f"(mt5.order_check({fields!r}))"
-        )
-        if result is None:
-            raise MT5ServiceError(f"order_check failed: {self.last_error()}")
-        return result
-
     def market_order(
         self,
         symbol: str,
         side: Literal["buy", "sell"],
-        volume: float,
+        volume: float | Decimal,
         *,
-        sl: float | None = None,
-        tp: float | None = None,
-        comment: str = "FoxBot Market",
+        sl: float | Decimal | None = None,
+        tp: float | Decimal | None = None,
+        entry: float | Decimal | None = None,
+        request_id: str | None = None,
+        submit: bool = False,
+        settings: Settings | None = None,
+        comment: str | None = None,
     ) -> dict[str, Any]:
-        return self._send(
-            self._market_order_request(
-                symbol, side, volume, sl=sl, tp=tp, comment=comment
-            )
-        )
-
-    def check_market_order(
-        self,
-        symbol: str,
-        side: Literal["buy", "sell"],
-        volume: float,
-        *,
-        sl: float,
-        tp: float,
-    ) -> dict[str, Any]:
-        """Check a hypothetical market order with the demo broker."""
+        """Preview or submit an order. Use the supplied lot volume."""
+        settings = settings or get_settings()
+        if symbol != settings.MT5_SYMBOL:
+            raise ValueError(f"Expected configured symbol {settings.MT5_SYMBOL}")
         if sl is None or tp is None:
-            raise ValueError("Provide both SL and TP for a market order check")
-        request = self._market_order_request(
-            symbol, side, volume, sl=sl, tp=tp, comment="FoxBot Market"
+            raise ValueError("Provide both a stop loss and a take profit")
+        request_id = request_id or comment
+        if submit and not request_id:
+            raise ValueError(
+                "Submission needs a stable request ID. Use --request-id ID"
+            )
+        order = MarketOrder(
+            request_id=request_id or uuid4().hex,
+            side=side,
+            entry=self._decimal(entry, "entry") if entry is not None else None,
+            stop=self._decimal(sl, "sl"),
+            target=self._decimal(tp, "tp"),
+            volume=self._decimal(volume, "volume"),
         )
-        price = request["price"]
-        if side == "buy" and not request["sl"] < price < request["tp"]:
-            raise ValueError("BUY requires SL below the current ask and TP above it")
-        if side == "sell" and not request["tp"] < price < request["sl"]:
-            raise ValueError("SELL requires TP below the current bid and SL above it")
-        return self.order_check(request)
-
-    def _market_order_request(
-        self,
-        symbol: str,
-        side: Literal["buy", "sell"],
-        volume: float,
-        *,
-        sl: float | None = None,
-        tp: float | None = None,
-        comment: str = "FoxBot Market",
-    ) -> dict[str, Any]:
-        if side not in ("buy", "sell"):
-            raise ValueError("side must be 'buy' or 'sell'")
-        info = self.symbol_info(symbol)
-        tick = self.tick(symbol)
-        is_buy = side == "buy"
-        request = {
-            "action": self.mt5.TRADE_ACTION_DEAL,
-            "symbol": symbol,
-            "volume": self._volume(info, volume),
-            "type": self.mt5.ORDER_TYPE_BUY if is_buy else self.mt5.ORDER_TYPE_SELL,
-            "price": tick["ask"] if is_buy else tick["bid"],
-            "deviation": self.deviation,
-            "magic": self.magic,
-            "comment": comment,
-            "type_time": self.mt5.ORDER_TIME_GTC,
-            "type_filling": self.get_filling_mode(symbol),
-        }
-        if sl is not None:
-            request["sl"] = float(self._decimal(sl, "sl"))
-        if tp is not None:
-            request["tp"] = float(self._decimal(tp, "tp"))
-        return request
+        return self.execute_market_order(self, settings, order, submit=submit)
 
     def buy(
         self,
         symbol: str,
-        volume: float,
+        volume: float | Decimal,
         *,
-        sl: float | None = None,
-        tp: float | None = None,
-        comment: str = "FoxBot Market",
+        sl: float | Decimal | None = None,
+        tp: float | Decimal | None = None,
+        comment: str | None = None,
+        entry: float | Decimal | None = None,
+        request_id: str | None = None,
+        submit: bool = False,
     ) -> dict[str, Any]:
-        return self.market_order(symbol, "buy", volume, sl=sl, tp=tp, comment=comment)
+        return self.market_order(
+            symbol,
+            "buy",
+            volume,
+            sl=sl,
+            tp=tp,
+            comment=comment,
+            entry=entry,
+            request_id=request_id,
+            submit=submit,
+        )
 
     def sell(
         self,
         symbol: str,
-        volume: float,
+        volume: float | Decimal,
         *,
-        sl: float | None = None,
-        tp: float | None = None,
-        comment: str = "FoxBot Market",
+        sl: float | Decimal | None = None,
+        tp: float | Decimal | None = None,
+        comment: str | None = None,
+        entry: float | Decimal | None = None,
+        request_id: str | None = None,
+        submit: bool = False,
     ) -> dict[str, Any]:
-        return self.market_order(symbol, "sell", volume, sl=sl, tp=tp, comment=comment)
-
-    def close_position(
-        self, ticket: int, *, volume: float | None = None
-    ) -> dict[str, Any]:
-        position = self.position(ticket)
-        if position is None:
-            raise MT5ServiceError(f"Position {ticket} is not open")
-        symbol = position["symbol"]
-        info = self.symbol_info(symbol)
-        existing = self._decimal(position["volume"], "position volume")
-        lots = existing if volume is None else self._decimal(volume, "close volume")
-        if lots > existing:
-            raise ValueError("close volume must be <= position volume")
-        tick = self.tick(symbol)
-        position_type = position["type"]
-        if position_type not in (
-            self.mt5.POSITION_TYPE_BUY,
-            self.mt5.POSITION_TYPE_SELL,
-        ):
-            raise MT5ServiceError(f"Unrecognized direction for position {ticket}")
-        is_buy = position_type == self.mt5.POSITION_TYPE_BUY
-        return self._send(
-            {
-                "action": self.mt5.TRADE_ACTION_DEAL,
-                "symbol": symbol,
-                "position": int(ticket),
-                "volume": self._volume(info, lots),
-                "type": self.mt5.ORDER_TYPE_SELL if is_buy else self.mt5.ORDER_TYPE_BUY,
-                "price": tick["bid"] if is_buy else tick["ask"],
-                "deviation": self.deviation,
-                "magic": self.magic,
-                "comment": "FoxBot Close",
-                "type_time": self.mt5.ORDER_TIME_GTC,
-                "type_filling": self.get_filling_mode(symbol),
-            }
+        return self.market_order(
+            symbol,
+            "sell",
+            volume,
+            sl=sl,
+            tp=tp,
+            comment=comment,
+            entry=entry,
+            request_id=request_id,
+            submit=submit,
         )
 
-    def update_stops(
-        self, ticket: int, *, sl: float | None = None, tp: float | None = None
-    ) -> dict[str, Any]:
-        if sl is None and tp is None:
-            raise ValueError("Provide sl or tp")
-        position = self.position(ticket)
-        if position is None:
-            raise MT5ServiceError(f"Position {ticket} is not open")
-        return self._send(
-            {
-                "action": self.mt5.TRADE_ACTION_SLTP,
-                "symbol": position["symbol"],
-                "position": int(ticket),
-                "sl": position["sl"] if sl is None else float(self._decimal(sl, "sl")),
-                "tp": (
-                    position["tp"]
-                    if tp is None
-                    else float(self._decimal(tp, "tp", allow_zero=True))
+    @staticmethod
+    def _validate_settings(settings: Settings) -> None:
+        if not re.fullmatch(r"XAUUSD[A-Za-z0-9._-]*", settings.MT5_SYMBOL):
+            raise ValueError("MT5_SYMBOL must be XAUUSD or XAUUSD with a broker suffix")
+        if settings.MT5_MAGIC <= 0:
+            raise ValueError("MT5_MAGIC must be positive")
+
+    @staticmethod
+    def _reconcile(
+        db: sqlite3.Connection, scope: str, mt5: MT5Service, now: int
+    ) -> None:
+        pending = db.execute(
+            "SELECT request_id, tag, created, symbol, magic, deal_type, broker_order "
+            "FROM mt5_requests "
+            "WHERE account = ? AND status = 'pending'",
+            (scope,),
+        ).fetchall()
+        for request_id, tag, created, symbol, magic, deal_type, broker_order in pending:
+            deals = mt5.deals_between(created, now)
+            matched = next(
+                (
+                    deal
+                    for deal in deals
+                    if (
+                        (
+                            deal.get("comment") == tag
+                            or (broker_order and deal.get("order") == broker_order)
+                        )
+                        and deal.get("symbol") == symbol
+                        and deal.get("magic") == magic
+                        and deal.get("type") == deal_type
+                        and deal.get("entry") == mt5.mt5.DEAL_ENTRY_IN
+                        and type(deal.get("ticket")) is int
+                        and deal["ticket"] > 0
+                    )
                 ),
-            }
-        )
+                None,
+            )
+            if matched is not None:
+                db.execute(
+                    "UPDATE mt5_requests SET status = 'filled', broker_deal = ? "
+                    "WHERE account = ? AND request_id = ?",
+                    (matched["ticket"], scope, request_id),
+                )
+            else:
+                raise MT5ServiceError(
+                    f"Request {request_id} has an unresolved outcome. "
+                    "Check broker history and positions before placing another order"
+                )
 
-    def place_pending(
-        self,
-        symbol: str,
-        side: Literal["buy", "sell"],
-        kind: Literal["limit", "stop"],
-        volume: float,
-        price: float,
-        *,
-        sl: float | None = None,
-        tp: float | None = None,
-        comment: str = "FoxBot Pending",
+    @staticmethod
+    def _quote(mt5: MT5Service, settings: Settings) -> dict[str, Any]:
+        tick = mt5.tick(settings.MT5_SYMBOL)
+        stamp = tick.get("time_msc")
+        if type(stamp) is not int or stamp <= 0:
+            raise MT5ServiceError(
+                f"MT5 returned no valid tick timestamp for {settings.MT5_SYMBOL}"
+            )
+        quote_utc = stamp / 1000 - settings.MT5_QUOTE_UTC_OFFSET_MINUTES * 60
+        age = time() - quote_utc
+        if age < 0:
+            raise MT5ServiceError(
+                f"MT5 quote for {settings.MT5_SYMBOL} is {-age:.2f}s ahead of the local clock. "
+                "Check clock synchronization and MT5_QUOTE_UTC_OFFSET_MINUTES"
+            )
+        if age > settings.MAX_QUOTE_AGE_SECONDS:
+            raise MT5ServiceError(
+                f"MT5 quote for {settings.MT5_SYMBOL} is stale ({age:.2f}s old, "
+                f"limit {settings.MAX_QUOTE_AGE_SECONDS}s)"
+            )
+        return tick
+
+    @staticmethod
+    def _record_result(
+        db: sqlite3.Connection,
+        scope: str,
+        request_id: str,
+        mt5: MT5Service,
+        result: dict[str, Any] | None,
     ) -> dict[str, Any]:
-        """Reject pending order placement, which is outside FoxBot v1."""
-        raise MT5ServiceError("Pending order placement is outside FoxBot v1")
+        api = mt5.mt5
+        result = result or {}
+        retcode = result.get("retcode")
+        status = "pending"
+        if (
+            retcode in (api.TRADE_RETCODE_DONE, api.TRADE_RETCODE_DONE_PARTIAL)
+            and type(result.get("deal")) is int
+            and result["deal"] > 0
+        ):
+            status = "filled" if retcode == api.TRADE_RETCODE_DONE else "partial"
+        elif result.get("guard_blocked") is True or retcode in (
+            api.TRADE_RETCODE_REJECT,
+            api.TRADE_RETCODE_REQUOTE,
+            api.TRADE_RETCODE_INVALID,
+            api.TRADE_RETCODE_INVALID_VOLUME,
+            api.TRADE_RETCODE_INVALID_STOPS,
+            api.TRADE_RETCODE_NO_MONEY,
+            api.TRADE_RETCODE_MARKET_CLOSED,
+            api.TRADE_RETCODE_PRICE_CHANGED,
+        ):
+            status = "rejected"
+        with db:
+            db.execute(
+                "UPDATE mt5_requests SET status = ?, broker_order = ?, broker_deal = ?, retcode = ? "
+                "WHERE account = ? AND request_id = ? AND status = 'pending'",
+                (
+                    status,
+                    result.get("order"),
+                    result.get("deal"),
+                    retcode,
+                    scope,
+                    request_id,
+                ),
+            )
+        if status == "pending":
+            raise MT5ServiceError(
+                f"Request {request_id} has an uncertain result ({retcode}). Do not resend"
+            )
+        if status == "rejected":
+            reason = (
+                "account or quote changed"
+                if result.get("guard_blocked")
+                else f"retcode {retcode}"
+            )
+            raise MT5ServiceError(f"Request {request_id} was rejected ({reason})")
+        return {"status": status, "request_id": request_id, **result}
 
-    def cancel_pending_order(self, ticket: int) -> dict[str, Any]:
-        if self.pending_order(ticket) is None:
-            raise MT5ServiceError(f"Pending order {ticket} not found")
-        return self._send(
-            {"action": self.mt5.TRADE_ACTION_REMOVE, "order": int(ticket)}
+    @staticmethod
+    def execute_market_order(
+        mt5: MT5Service, settings: Settings, order: MarketOrder, *, submit: bool = False
+    ) -> dict[str, Any]:
+        """Check a manual order or place it once with durable recovery state."""
+        MT5Service._validate_settings(settings)
+        if submit and not settings.ENABLE_TRADING:
+            raise MT5ServiceError("Order submission requires ENABLE_TRADING=true")
+        if not settings.STATE_DB_PATH or settings.STATE_DB_PATH == ":memory:":
+            raise MT5ServiceError("MT5 order state requires a persistent SQLite file")
+        try:
+            with closing(sqlite3.connect(settings.STATE_DB_PATH)) as db:
+                return MT5Service._execute(db, mt5, settings, order, submit=submit)
+        except sqlite3.Error as exc:
+            raise MT5ServiceError(
+                f"Cannot access or update MT5 order state for {order.request_id}. Check the journal before retrying"
+            ) from exc
+
+    @staticmethod
+    def _execute(
+        db: sqlite3.Connection,
+        mt5: MT5Service,
+        settings: Settings,
+        order: MarketOrder,
+        *,
+        submit: bool,
+    ) -> dict[str, Any]:
+        now = int(time())
+        # Preserve existing journal keys across upgrades. Account metadata only namespaces requests.
+        account = mt5.account()
+        scope = repr(
+            tuple(account.get(key) for key in ("login", "server", "trade_mode"))
         )
+        tag = "FB-" + sha256(f"{scope}:{order.request_id}".encode()).hexdigest()[:24]
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS mt5_requests ("
+            "account TEXT, request_id TEXT, tag TEXT, created INTEGER, symbol TEXT, "
+            "magic INTEGER, deal_type INTEGER, status TEXT, broker_order INTEGER, "
+            "broker_deal INTEGER, retcode INTEGER, PRIMARY KEY (account, request_id))"
+        )
+        with db:
+            db.execute("BEGIN IMMEDIATE")
+            MT5Service._reconcile(db, scope, mt5, now)
+        with db:
+            db.execute("BEGIN IMMEDIATE")
+            MT5Service._reconcile(db, scope, mt5, now)
+            if db.execute(
+                "SELECT 1 FROM mt5_requests WHERE account=? AND request_id=?",
+                (scope, order.request_id),
+            ).fetchone():
+                raise MT5ServiceError(
+                    f"Request {order.request_id} was already submitted"
+                )
+
+            tick = MT5Service._quote(mt5, settings)
+            bid, ask = Decimal(str(tick["bid"])), Decimal(str(tick["ask"]))
+            price = ask if order.side == "buy" else bid
+            if ask - bid > settings.MAX_SPREAD:
+                raise MT5ServiceError("Spread exceeds MAX_SPREAD")
+            if (
+                order.entry is not None
+                and abs(price - order.entry) > settings.MAX_ENTRY_DEVIATION
+            ):
+                raise MT5ServiceError("Price exceeds MAX_ENTRY_DEVIATION")
+            info = mt5.symbol_info(settings.MT5_SYMBOL)
+            request = {
+                "action": mt5.mt5.TRADE_ACTION_DEAL,
+                "symbol": settings.MT5_SYMBOL,
+                "volume": mt5._volume(info, order.volume),
+                "type": mt5.mt5.ORDER_TYPE_BUY
+                if order.side == "buy"
+                else mt5.mt5.ORDER_TYPE_SELL,
+                "price": float(price),
+                "sl": float(order.stop),
+                "tp": float(order.target),
+                "magic": settings.MT5_MAGIC,
+                "deviation": mt5.deviation,
+                "type_time": mt5.mt5.ORDER_TIME_GTC,
+                "type_filling": mt5.get_filling_mode(settings.MT5_SYMBOL),
+                "comment": tag,
+            }
+
+            def call(method: str) -> dict[str, Any]:
+                result = mt5._eval(
+                    "(lambda row: {k: v for k, v in row._asdict().items() if k != 'request'} "
+                    f"if row is not None else None)(mt5.{method}({request!r}))"
+                )
+                if result is None:
+                    raise MT5ServiceError(f"{method} failed: {mt5.last_error()}")
+                return result
+
+            check = call("order_check")
+            if check.get("retcode") != 0:
+                raise MT5ServiceError(
+                    f"Broker order check failed: {check.get('comment')}"
+                )
+            if not submit:
+                return {"status": "dry_run", "request_id": order.request_id, **request}
+            deal_type = (
+                mt5.mt5.DEAL_TYPE_BUY if order.side == "buy" else mt5.mt5.DEAL_TYPE_SELL
+            )
+            db.execute(
+                "INSERT INTO mt5_requests (account, request_id, tag, created, symbol, magic, deal_type, status) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')",
+                (
+                    scope,
+                    order.request_id,
+                    tag,
+                    now,
+                    settings.MT5_SYMBOL,
+                    settings.MT5_MAGIC,
+                    deal_type,
+                ),
+            )
+
+        try:
+            result = call("order_send")
+        except MT5ServiceError as exc:
+            raise MT5ServiceError(
+                f"Request {order.request_id} has an uncertain outcome. Do not resend"
+            ) from exc
+        return MT5Service._record_result(db, scope, order.request_id, mt5, result)
+
+
+execute_market_order = MT5Service.execute_market_order
