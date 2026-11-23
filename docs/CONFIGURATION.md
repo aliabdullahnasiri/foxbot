@@ -9,7 +9,6 @@ TELEGRAM_CHANNEL=
 TELEGRAM_SESSION=foxbot.session
 
 CELERY_BROKER_URL=
-REDIS_URL=redis://localhost:6379/0
 
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=qwen2.5:3b
@@ -22,17 +21,12 @@ MT5_SYMBOL=XAUUSD
 MT5_MAGIC=20261121
 MT5_QUOTE_UTC_OFFSET_MINUTES=0
 
-RISK_PERCENT=0.5
 MAX_ENTRY_DEVIATION=2.0
 MAX_SPREAD=0.5
 MAX_SIGNAL_AGE_SECONDS=120
 MAX_QUOTE_AGE_SECONDS=10
 ENABLE_TRADING=false
-ENABLE_REAL_TRADING=false
-# MT5_SLIPPAGE_ALLOWANCE=
-# MT5_ROUND_TRIP_COST_PER_LOT=
 
-STATE_DB_PATH=foxbot_state.sqlite3
 LOG_LEVEL=INFO
 ```
 
@@ -51,6 +45,6 @@ These price limits are **example configuration values**, not proven broker-safe 
 
 Use `uv run bot mt5-order --side sell --volume LOTS --sl STOP --tp TARGET`, replacing the placeholders with your lot size and prices. Buy orders use the ask and sell orders use the bid. Add `--entry PRICE` to set a reference for the entry deviation check.
 
-The preview displays a request ID. To submit, enable `ENABLE_TRADING=true` and repeat the command with `--request-id ID --submit`. Use the same SQLite journal and ID when checking an uncertain submission. The broker checks the order before FoxBot sends it.
+To submit, enable `ENABLE_TRADING=true` and add `--submit`. Each invocation can open a new position. Check the terminal before retrying an uncertain order.
 
 Manual submission uses the connected terminal account, including real accounts. The command uses your exact volume and skips account eligibility checks and portfolio risk calculations. Python callers can use `mt5.buy(symbol, volume, sl=stop, tp=target)` or `mt5.sell(symbol, volume, sl=stop, tp=target)`.
