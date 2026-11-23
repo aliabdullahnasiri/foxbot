@@ -1,6 +1,6 @@
 # AGENTS.md — Codex instructions for FoxBot
 
-Manual MT5 orders use an operator-supplied lot size on the connected terminal account. Account eligibility, real-mode opt-in, and portfolio risk controls described below apply only to the planned automated workflow. Manual submission requires explicit execution, a checked broker request, and a durable request ID.
+Manual MT5 orders use an operator-supplied lot size on the connected terminal account. Account eligibility, real-mode opt-in, and portfolio risk controls described below apply only to the planned automated workflow. Manual submission requires explicit execution and a checked broker request.
 
 Read `PROJECT_CONTEXT.md`, `docs/REQUIREMENTS.md`, `docs/SAFETY.md`, and `tasks/NEXT.md` before changes. Follow the explicit **minimal-scope** decisions. This file governs the entire repository.
 
@@ -11,7 +11,7 @@ Read `PROJECT_CONTEXT.md`, `docs/REQUIREMENTS.md`, `docs/SAFETY.md`, and `tasks/
 4. Prefer `async` for Telethon and Ollama; isolate synchronous MT5 calls behind a small adapter so they do not block the event loop.
 5. No runtime OpenAI SDK or paid AI integration; Ollama uses native HTTP with `httpx`.
 6. Do not introduce a database server, ORM, frontend, Docker, or unnecessary architectural layers.
-7. Never commit `.env`, session files, MT5 credentials, trade records, secrets, or SQLite state.
+7. Never commit `.env`, session files, MT5 credentials, trade records, secrets.
 8. Check all LLM-extracted fields against the message. LLM output is untrusted.
 9. Default to dry run and demo mode. Real MT5 orders require the manual execution command, explicitly selected real mode, and separate opt-in. Never remove hard risk limits to make an order pass.
 10. Write relevant tests, run `uv run pytest` and `uv run ruff check .` if installed; report actual results, not guessed results.
