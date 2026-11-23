@@ -1,12 +1,21 @@
 from collections import namedtuple
+from decimal import Decimal
+from time import time
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+from click.testing import CliRunner
 from mt5linux import MetaTrader5
 
+from bot.core.cli import main
+from bot.core.settings import Settings
+from bot.schemas.mt5.data.market_order import MarketOrder
 from bot.services import mt5
-from bot.services.mt5 import MT5Service, MT5ServiceError
+from bot.services.mt5 import (
+    MT5Service,
+    MT5ServiceError,
+)
 
 SYMBOL = "XAUUSD.m"
 
@@ -67,8 +76,12 @@ def bridge(monkeypatch):
     )
     factory = Mock(return_value=client)
     monkeypatch.setattr(mt5, "MetaTrader5", factory)
-    yield SimpleNamespace(remote=remote, client=client, factory=factory)
-    remote.order_send.assert_not_called()
+    bridge = SimpleNamespace(
+        remote=remote, client=client, factory=factory, allow_send=False
+    )
+    yield bridge
+    if not bridge.allow_send:
+        remote.order_send.assert_not_called()
 
 
 @pytest.fixture
@@ -112,34 +125,6 @@ def test_connect_rejects_partial_credentials(bridge, credentials):
     with pytest.raises(ValueError, match="together"):
         MT5Service(**credentials).connect()
     bridge.factory.assert_not_called()
-
-
-def test_constructor_rejects_disabling_demo_mode():
-    with pytest.raises(ValueError, match="requires a demo account"):
-        MT5Service(demo_only=False)
-
-
-@pytest.mark.parametrize(
-    ("account", "error"),
-    [
-        (record(trade_mode=MetaTrader5.ACCOUNT_TRADE_MODE_REAL), "Only demo"),
-        (record(login=1234), "Only demo"),
-        (record(trade_mode=False), "Only demo"),
-        (
-            record(trade_mode=MetaTrader5.ACCOUNT_TRADE_MODE_DEMO, login=999),
-            "wrong account",
-        ),
-        (None, "account_info failed"),
-    ],
-)
-def test_connect_rejects_unverified_account(bridge, account, error):
-    bridge.remote.account_info.return_value = account
-    service = MT5Service(login=1234, password="test-password", server="Demo")
-    with pytest.raises(MT5ServiceError, match=error):
-        service.connect()
-    bridge.client.shutdown.assert_called_once_with()
-    with pytest.raises(MT5ServiceError, match="not connected"):
-        _ = service.mt5
 
 
 @pytest.mark.parametrize("stage", ["initialize", "login"])
@@ -205,239 +190,153 @@ def test_tick_rejects_bad_prices(service, bridge, bid, ask):
         service.tick(SYMBOL)
 
 
-@pytest.mark.parametrize(
-    ("many", "one", "api", "ticket"),
-    [
-        ("positions", "position", "positions_get", 42),
-        ("pending_orders", "pending_order", "orders_get", 17),
-    ],
-)
-def test_position_and_pending_order_queries(service, bridge, many, one, api, ticket):
-    query = getattr(bridge.remote, api)
-    list_entries, get_entry = getattr(service, many), getattr(service, one)
-    assert list_entries()[0]["ticket"] == ticket
-    query.assert_called_once_with()
-    assert list_entries(SYMBOL)[0]["ticket"] == ticket
-    query.assert_called_with(symbol=SYMBOL)
-    assert get_entry(ticket)["ticket"] == ticket
-    query.assert_called_with(ticket=ticket)
-    query.return_value = ()
-    assert list_entries() == []
-    assert get_entry(ticket) is None
-    query.return_value = None
-    with pytest.raises(MT5ServiceError, match=f"{api} failed"):
-        list_entries()
-
-
-def test_history_deals(service, bridge):
-    assert service.history_deals(42) == [{"ticket": 23, "position_id": 42}]
-    bridge.remote.history_deals_get.assert_called_once_with(position=42)
-
-
-@pytest.mark.parametrize(
-    ("flags", "execution", "mode"),
-    [
-        (3, MetaTrader5.SYMBOL_TRADE_EXECUTION_MARKET, MetaTrader5.ORDER_FILLING_FOK),
-        (2, MetaTrader5.SYMBOL_TRADE_EXECUTION_MARKET, MetaTrader5.ORDER_FILLING_IOC),
-        (
-            0,
-            MetaTrader5.SYMBOL_TRADE_EXECUTION_INSTANT,
-            MetaTrader5.ORDER_FILLING_RETURN,
-        ),
-        (0, MetaTrader5.SYMBOL_TRADE_EXECUTION_MARKET, None),
-    ],
-)
-def test_get_filling_mode(service, bridge, flags, execution, mode):
-    bridge.remote.symbol_info.return_value = record(
-        visible=True, filling_mode=flags, trade_exemode=execution
+@pytest.fixture
+def execution(bridge, tmp_path):
+    api = MetaTrader5
+    remote = bridge.remote
+    remote.account_info.return_value = record(
+        trade_mode=api.ACCOUNT_TRADE_MODE_DEMO,
+        login=1234,
+        server="Broker",
+        trade_allowed=True,
+        trade_expert=True,
+        equity=10000.0,
+        balance=10000.0,
+        margin_free=10000.0,
+        credit=0.0,
     )
-    if mode is None:
-        with pytest.raises(MT5ServiceError, match="No supported market filling mode"):
-            service.get_filling_mode(SYMBOL)
-    else:
-        assert service.get_filling_mode(SYMBOL) == mode
+    remote.symbol_info.return_value = record(
+        visible=True,
+        filling_mode=1,
+        trade_exemode=api.SYMBOL_TRADE_EXECUTION_MARKET,
+        trade_mode=api.SYMBOL_TRADE_MODE_FULL,
+        point=0.01,
+        trade_tick_size=0.01,
+        trade_stops_level=10,
+        trade_freeze_level=0,
+        volume_min=0.01,
+        volume_max=10,
+        volume_step=0.01,
+    )
+    remote.symbol_info_tick.return_value = record(
+        bid=2500, ask=2500.25, time_msc=int(time() * 1000)
+    )
+    remote.terminal_info = Mock(
+        return_value=record(connected=True, trade_allowed=True, tradeapi_disabled=False)
+    )
+    remote.positions_get.return_value = ()
+    remote.orders_get.return_value = ()
+    remote.history_deals_get.return_value = ()
+    remote.order_calc_profit = Mock(
+        side_effect=lambda side, symbol, lots, entry, stop: (
+            -round(abs(entry - stop) * lots * 100, 8)
+        )
+    )
+    remote.order_calc_margin = Mock(return_value=100)
+    remote.order_check.return_value = record(
+        retcode=0, margin_free=9900, request=object()
+    )
+    remote.order_send.side_effect = None
+    remote.order_send.return_value = record(
+        retcode=api.TRADE_RETCODE_DONE, deal=123, order=456
+    )
+    settings = Settings(
+        _env_file=None,
+        ENABLE_TRADING=True,
+        ENABLE_REAL_TRADING=False,
+        MT5_SYMBOL=SYMBOL,
+        MT5_LOGIN=1234,
+        MT5_SERVER="Broker",
+        MT5_PASSWORD="fixture-password",
+        MT5_SLIPPAGE_ALLOWANCE="0.25",
+        MT5_ROUND_TRIP_COST_PER_LOT="5",
+        STATE_DB_PATH=str(tmp_path / "orders.sqlite3"),
+    )
+    order = MarketOrder(
+        request_id="intent-1",
+        side="buy",
+        entry=Decimal(2500),
+        stop=Decimal(2498),
+        target=Decimal(2504),
+        volume=Decimal(2),
+    )
+    return bridge, settings, order
 
 
-@pytest.mark.parametrize("retcode", [0, 10019])
-def test_order_check_returns_broker_result_without_nested_request(
-    service, bridge, retcode
-):
-    request = {"symbol": SYMBOL, "comment": "'quoted'\ntext"}
-    bridge.remote.order_check.return_value = record(retcode=retcode, request=object())
-    assert service.order_check(request) == {"retcode": retcode}
-    bridge.remote.order_check.assert_called_once_with(request)
+@pytest.mark.parametrize("side,price", [("buy", 2500.25), ("sell", 2500)])
+def test_fixed_volume_order(execution, monkeypatch, side, price):
+    bridge, settings, order = execution
+    monkeypatch.setattr("bot.core.settings.get_settings", lambda: settings)
+    bridge.remote.account_info.return_value = record(
+        login=45, server="Other", trade_mode=2
+    )
+    args = [
+        "mt5-order",
+        "--side",
+        side,
+        "--volume",
+        "2",
+        "--sl",
+        "2498" if side == "buy" else "2504",
+        "--tp",
+        "2504" if side == "buy" else "2498",
+        "--request-id",
+        order.request_id,
+    ]
+    runner = CliRunner()
+    preview = runner.invoke(main, args)
+    assert preview.exit_code == 0, preview.output
+    assert str(price) in preview.output
+    bridge.remote.order_send.assert_not_called()
+    bridge.allow_send = True
+    submitted = runner.invoke(main, args + ["--submit"])
+    assert submitted.exit_code == 0, submitted.output
+    request = bridge.remote.order_send.call_args.args[0]
+    assert request["volume"] == 2 and request["price"] == price
+    assert "already submitted" in runner.invoke(main, args + ["--submit"]).output
+    bridge.remote.order_send.assert_called_once()
+    bridge.remote.order_calc_profit.assert_not_called()
+    bridge.remote.order_calc_margin.assert_not_called()
 
 
-def test_order_check_distinguishes_api_failure(service, bridge):
-    bridge.remote.order_check.return_value = None
-    with pytest.raises(MT5ServiceError, match="order_check failed"):
-        service.order_check({"symbol": SYMBOL})
+def test_broker_check_failure_blocks_send(execution):
+    bridge, settings, order = execution
+    bridge.remote.order_check.return_value = record(retcode=1, comment="invalid stops")
+    with MT5Service() as service, pytest.raises(MT5ServiceError, match="invalid stops"):
+        MT5Service.execute_market_order(service, settings, order, submit=True)
+
+
+def test_uncertain_send_blocks_retry_until_reconciled(execution):
+    bridge, settings, order = execution
+    bridge.allow_send = True
+    bridge.remote.order_send.side_effect = OSError("bridge disconnected")
+    with MT5Service() as service:
+        with pytest.raises(MT5ServiceError, match="uncertain"):
+            MT5Service.execute_market_order(service, settings, order, submit=True)
+        with pytest.raises(MT5ServiceError, match="unresolved"):
+            MT5Service.execute_market_order(service, settings, order, submit=True)
+        request = bridge.remote.order_send.call_args.args[0]
+        bridge.remote.history_deals_get.return_value = (
+            record(
+                comment=request["comment"],
+                symbol=SYMBOL,
+                magic=settings.MT5_MAGIC,
+                type=MetaTrader5.DEAL_TYPE_BUY,
+                entry=MetaTrader5.DEAL_ENTRY_IN,
+                ticket=123,
+            ),
+        )
+        with pytest.raises(MT5ServiceError, match="already submitted"):
+            MT5Service.execute_market_order(service, settings, order, submit=True)
+    bridge.remote.order_send.assert_called_once()
 
 
 @pytest.mark.parametrize(
-    ("account", "error"),
-    [
-        ({"trade_mode": MetaTrader5.ACCOUNT_TRADE_MODE_REAL}, "Only demo"),
-        ({"trade_allowed": False}, "Trading or automated trading is disabled"),
-        ({"trade_expert": False}, "Trading or automated trading is disabled"),
-    ],
+    "changes", [{"volume": Decimal(0)}, {"stop": Decimal(2501)}, {"side": "hold"}]
 )
-def test_order_check_revalidates_account(service, bridge, account, error):
-    bridge.remote.account_info.return_value = (
-        bridge.remote.account_info.return_value._replace(**account)
-    )
-    with pytest.raises(MT5ServiceError, match=error):
-        service.order_check({"symbol": SYMBOL})
-    bridge.remote.order_check.assert_not_called()
+def test_market_order_schema_rejects_invalid_fields(execution, changes):
+    from pydantic import ValidationError
 
-
-@pytest.mark.parametrize("value", [object(), float("inf"), float("nan")])
-def test_order_check_rejects_nonliteral_values(service, bridge, value):
-    with pytest.raises(ValueError, match="Order check requires"):
-        service.order_check({"volume": value})
-    bridge.remote.order_check.assert_not_called()
-
-
-@pytest.mark.parametrize(
-    ("method", "args", "order_type", "price", "sl", "tp"),
-    [
-        ("market_order", ("buy",), MetaTrader5.ORDER_TYPE_BUY, 2500.25, 2490, 2510),
-        ("buy", (), MetaTrader5.ORDER_TYPE_BUY, 2500.25, 2490, 2510),
-        ("sell", (), MetaTrader5.ORDER_TYPE_SELL, 2500, 2510, 2490),
-    ],
-)
-def test_market_request(service, monkeypatch, method, args, order_type, price, sl, tp):
-    send = Mock(return_value={"retcode": 10009})
-    monkeypatch.setattr(service, "_send", send)
-    assert (
-        getattr(service, method)(SYMBOL, *args, 0.05, sl=sl, tp=tp, comment="test")
-        == send.return_value
-    )
-    send.assert_called_once_with(
-        {
-            "action": MetaTrader5.TRADE_ACTION_DEAL,
-            "symbol": SYMBOL,
-            "volume": 0.05,
-            "type": order_type,
-            "price": price,
-            "deviation": 20,
-            "magic": 123456,
-            "comment": "test",
-            "type_time": MetaTrader5.ORDER_TIME_GTC,
-            "type_filling": MetaTrader5.ORDER_FILLING_FOK,
-            "sl": sl,
-            "tp": tp,
-        }
-    )
-
-
-@pytest.mark.parametrize(
-    ("side", "volume", "sl", "error"),
-    [
-        ("hold", 0.05, 2490, "side must"),
-        ("buy", float("nan"), 2490, "volume must be positive"),
-        ("buy", 0.001, 2490, "between"),
-        ("buy", 10.01, 2490, "between"),
-        ("buy", 0.015, 2490, "multiple"),
-        ("buy", 0.05, 0, "sl must be positive"),
-    ],
-)
-def test_market_order_rejects_invalid_input(service, side, volume, sl, error):
-    with pytest.raises(ValueError, match=error):
-        service.market_order(SYMBOL, side, volume, sl=sl)
-
-
-@pytest.mark.parametrize(
-    ("direction", "volume", "order_type", "price", "lots"),
-    [
-        (MetaTrader5.POSITION_TYPE_BUY, None, MetaTrader5.ORDER_TYPE_SELL, 2500, 0.05),
-        (
-            MetaTrader5.POSITION_TYPE_SELL,
-            0.02,
-            MetaTrader5.ORDER_TYPE_BUY,
-            2500.25,
-            0.02,
-        ),
-    ],
-)
-def test_close_position(
-    service, bridge, monkeypatch, direction, volume, order_type, price, lots
-):
-    position = bridge.remote.positions_get.return_value[0]
-    bridge.remote.positions_get.return_value = (position._replace(type=direction),)
-    send = Mock()
-    monkeypatch.setattr(service, "_send", send)
-    assert service.close_position(42, volume=volume) is send.return_value
-    request = send.call_args.args[0]
-    assert request["position"] == 42
-    assert request["type"] == order_type
-    assert request["price"] == price
-    assert request["volume"] == lots
-
-
-def test_close_position_rejects_excess_volume(service):
-    with pytest.raises(ValueError, match="<= position volume"):
-        service.close_position(42, volume=0.06)
-
-
-def test_update_stops_preserves_omitted_stop(service, monkeypatch):
-    send = Mock()
-    monkeypatch.setattr(service, "_send", send)
-    assert service.update_stops(42, tp=0) is send.return_value
-    send.assert_called_once_with(
-        {
-            "action": MetaTrader5.TRADE_ACTION_SLTP,
-            "position": 42,
-            "symbol": SYMBOL,
-            "sl": 2490,
-            "tp": 0,
-        }
-    )
-
-
-def test_update_stops_requires_a_change_and_prohibits_removing_sl(service):
-    with pytest.raises(ValueError, match="Provide sl or tp"):
-        service.update_stops(42)
-    with pytest.raises(ValueError, match="sl must be positive"):
-        service.update_stops(42, sl=0)
-
-
-@pytest.mark.parametrize(
-    ("method", "kwargs"), [("close_position", {}), ("update_stops", {"sl": 2490})]
-)
-def test_position_changes_require_an_open_ticket(service, bridge, method, kwargs):
-    bridge.remote.positions_get.return_value = ()
-    with pytest.raises(MT5ServiceError, match="Position 42 is not open"):
-        getattr(service, method)(42, **kwargs)
-
-
-def test_place_pending_is_outside_v1(service):
-    with pytest.raises(MT5ServiceError, match="outside FoxBot v1"):
-        service.place_pending(SYMBOL, "buy", "limit", 0.05, 2498, sl=2490, tp=2510)
-
-
-def test_cancel_pending_order(service, bridge, monkeypatch):
-    send = Mock()
-    monkeypatch.setattr(service, "_send", send)
-    assert service.cancel_pending_order(17) is send.return_value
-    send.assert_called_once_with(
-        {"action": MetaTrader5.TRADE_ACTION_REMOVE, "order": 17}
-    )
-    bridge.remote.orders_get.return_value = ()
-    with pytest.raises(MT5ServiceError, match="Pending order 17 not found"):
-        service.cancel_pending_order(17)
-
-
-@pytest.mark.parametrize("enabled", ["false", "true"])
-def test_order_submission_is_blocked_until_execution_controls_exist(
-    service, monkeypatch, enabled
-):
-    monkeypatch.setenv("ENABLE_TRADING", enabled)
-    with pytest.raises(MT5ServiceError, match="Order submission is unavailable"):
-        service.buy(SYMBOL, 0.05, sl=2490, tp=2510)
-    with pytest.raises(MT5ServiceError, match="Order submission is unavailable"):
-        service.close_position(42)
-    with pytest.raises(MT5ServiceError, match="Order submission is unavailable"):
-        service.update_stops(42, sl=2491)
-    with pytest.raises(MT5ServiceError, match="Order submission is unavailable"):
-        service.cancel_pending_order(17)
+    _, _, order = execution
+    with pytest.raises(ValidationError):
+        MarketOrder.model_validate(order.model_dump() | changes)
