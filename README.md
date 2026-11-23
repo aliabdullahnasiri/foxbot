@@ -7,7 +7,7 @@
 3. Run `uv run bot telegram-login` once to create the local Telegram user session.
 4. Run `uv run bot telegram-monitor` to start the registered `telegram.monitor` Celery task in the foreground. Stop with Ctrl+C. Use one monitor per session file.
 
-The foreground command needs no broker. The monitor filters fresh XAUUSD BUY/SELL candidates and logs schema-validated Ollama extractions along with their channel and message IDs. Independent source verification, durable deduplication, and order execution are tracked in the backlog. [Implementation backlog](tasks/BACKLOG.md)
+The foreground command needs no broker. The monitor filters fresh XAUUSD BUY/SELL candidates and logs schema-validated Ollama extractions along with their channel and message IDs. Independent source verification and order execution are tracked in the backlog. [Implementation backlog](tasks/BACKLOG.md)
 
 For a queue-backed Celery worker, set `CELERY_BROKER_URL` in `.env` to a running broker, then start it with `uv run celery -A bot.core.celery:celery_app worker --pool=solo --loglevel=INFO`. FoxBot exits if the broker is unreachable at startup.
 
@@ -18,7 +18,7 @@ Run `uv run uvicorn bot:main --factory --reload` from the repository root.
 
 ## Manual MT5 orders
 
-Preview a market position with `uv run bot mt5-order --side buy --volume LOTS --sl STOP --tp TARGET`. Manual orders use the specified lot size on the connected terminal account, including real accounts. [Submission and request IDs](docs/CONFIGURATION.md#manual-mt5-orders)
+Preview a market position with `uv run bot mt5-order --side buy --volume LOTS --sl STOP --tp TARGET`. Manual orders use the specified lot size on the connected terminal account, including real accounts. [Manual submission](docs/CONFIGURATION.md#manual-mt5-orders)
 
 ## Project structure
 
