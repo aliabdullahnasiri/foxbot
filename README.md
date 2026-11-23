@@ -16,6 +16,10 @@ For a queue-backed Celery worker, set `CELERY_BROKER_URL` in `.env` to a running
 Run `uv run uvicorn bot:main --factory --reload` from the repository root.
 `GET /health` returns HTTP 200 with `{"status": "ok"}` for application liveness.
 
+## Manual MT5 orders
+
+Preview a market position with `uv run bot mt5-order --side buy --volume LOTS --sl STOP --tp TARGET`. Manual orders use the specified lot size on the connected terminal account, including real accounts. [Submission and request IDs](docs/CONFIGURATION.md#manual-mt5-orders)
+
 ## Project structure
 
 The installable package lives under `src/bot/`. The CLI, configuration, and external clients are under `core/`. Worker tasks live in `workers/`, HTTP routes in `api/`, signal schemas in `schemas/`, extraction prompts in `prompts/`, and the MT5 adapter in `services/`.  [Architecture](docs/ARCHITECTURE.md)
