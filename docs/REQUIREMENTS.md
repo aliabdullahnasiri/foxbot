@@ -1,7 +1,16 @@
 # FoxBot v1 — Functional Requirements
 
 ## Dependencies
-Runtime: `telethon`, `httpx`, `pydantic`, `python-dotenv`, `celery`, and `MetaTrader5` (on Windows). Development: `pytest`, `pytest-asyncio`, `ruff`.
+
+Python 3.12 and `uv` are required. The package uses Click, FastAPI, Telethon, Celery, Redis, HTTPX, Pydantic, and `mt5linux`. The native `MetaTrader5` dependency is declared for Windows. See the manifest for the complete runtime and development dependencies. [pyproject.toml](../pyproject.toml)
+
+## Application entry points
+
+- `uv run bot telegram-login` creates the local Telegram session.
+- `uv run bot telegram-monitor` runs the foreground Telegram task without a broker.
+- `uv run uvicorn bot:main --factory` serves the FastAPI liveness endpoint at `GET /health`.
+
+The acceptance criteria below describe the target for v1. [Implementation backlog](../tasks/BACKLOG.md)
 
 ## Telegram
 - Authenticate as a user via API ID/hash and local Telethon session; monitor authorized channel only.
