@@ -1,7 +1,9 @@
 # FoxBot — Project Context
 
+Manual MT5 orders use an operator-supplied lot size on the connected terminal account. Account eligibility, real-mode opt-in, and portfolio risk controls described below apply only to the planned automated workflow. Manual submission requires explicit execution, a checked broker request, and a durable request ID.
+
 ## Mission
-Build **FoxBot**, a minimal Python 3.12 application that listens to exactly one Telegram channel, asks a **locally running Ollama** model to extract forex trading signals, validates the output deterministically, and optionally executes eligible trades through an installed MetaTrader 5 terminal on a **demo account only**.
+Build **FoxBot**, a minimal Python 3.12 application that listens to exactly one Telegram channel, asks a **locally running Ollama** model to extract forex trading signals, validates the output deterministically, and optionally executes eligible trades through an installed MetaTrader 5 terminal using demo mode by default. The manual MT5 command supports demo and explicitly enabled real accounts.
 
 ## Scope (v1)
 - Single Windows machine: Telegram listener, Ollama, Python process, and installed MetaTrader 5 terminal.
@@ -9,20 +11,20 @@ Build **FoxBot**, a minimal Python 3.12 application that listens to exactly one 
 - XAUUSD BUY/SELL only, including configurable broker symbol suffixes such as `XAUUSD.m`.
 - Extract entry, SL, and multiple TPs; execute at market only when current price is near stated entry, using **TP1**.
 - Use Pydantic for output schemas and strict source-text verification. AI does **not** decide risk or trading actions.
-- Risk from equity: 0.5% per signal; 2% daily-loss limit; maximum one FoxBot XAUUSD position; hard stop loss.
+- Risk from equity: 0.5% per signal; maximum one FoxBot XAUUSD position; hard stop loss.
 - Disabled execution by default (`ENABLE_TRADING=false`), with dry-run logs.
 - SQLite using Python `sqlite3` for message deduplication and execution records.
 - Standard-library logging; tests with mocked integrations.
 
 ## Explicit Non-goals
-No web dashboard, PostgreSQL, SQLAlchemy, Docker, paid AI APIs, backtesting, pending orders, multi-account trading, multi-channel ingestion, TP2/TP3 management, auto-trading edited messages, real-account trading, or automatic strategy optimization.
+No web dashboard, PostgreSQL, SQLAlchemy, Docker, paid AI APIs, backtesting, pending orders, multi-account trading, multi-channel ingestion, TP2/TP3 management, auto-trading edited messages, automated real-account trading, or automatic strategy optimization.
 
 The Telegram monitor is a registered Celery task and can run in the foreground without a broker. Queue workers use an explicitly configured broker.
 
 `bot/core/redis.py` exposes an async Redis client configured by `REDIS_URL`.
 
 ## Technology
-Python 3.12 and `uv`, Click for the CLI, FastAPI for liveness, Telethon and Celery for the Telegram monitor, and a Redis client for Redis-backed integrations. Ollama uses native `/api/chat` through `httpx`. Pydantic validates configuration and signal data. The MT5 adapter uses `mt5linux` to access a demo terminal. SQLite is planned for durable trade state. Tests use pytest.
+Python 3.12 and `uv`, Click for the CLI, FastAPI for liveness, Telethon and Celery for the Telegram monitor, and a Redis client for Redis-backed integrations. Ollama uses native `/api/chat` through `httpx`. Pydantic validates configuration and signal data. The MT5 adapter uses `mt5linux` to access the terminal. Manual orders use SQLite for request tracking and reconciliation. Tests use pytest.
 
 ## Target v1 flow
 1. Telethon event handler receives a fresh message from the configured channel.
@@ -30,7 +32,7 @@ Python 3.12 and `uv`, Click for the CLI, FastAPI for liveness, Telethon and Cele
 3. Send text to Ollama; require JSON; parse and independently verify against source message.
 4. Reject unsuitable or stale signals and invalid SL/TP direction.
 5. If execution disabled, print a detailed dry-run decision.
-6. If enabled, confirm demo MT5 account, quote freshness, spread, entry tolerance, one-position policy, daily limit, and risk-based lot size.
+6. If enabled, confirm demo MT5 account, quote freshness, spread, entry tolerance, one-position policy, and risk-based lot size.
 7. `order_check()` then `order_send()`; record result and reconcile uncertain outcomes before any retry.
 
 ## Example message
@@ -75,4 +77,4 @@ foxbot/
 ├── docs/
 └── tasks/
 ```
-Run `uv run bot --help` for CLI commands or `uv run uvicorn bot:main --factory` to serve `GET /health`. The foreground monitor logs schema-validated Ollama extractions. Independent source verification, durable SQLite state, risk sizing, and order submission are tracked in the backlog. [Implementation backlog](tasks/BACKLOG.md)
+Run `uv run bot --help` for CLI commands or `uv run uvicorn bot:main --factory` to serve `GET /health`. The foreground monitor logs schema-validated Ollama extractions. Telegram source verification, message deduplication, and order execution are tracked in the backlog. Use `uv run bot mt5-order --help` for manual MT5 orders. [Implementation backlog](tasks/BACKLOG.md)
