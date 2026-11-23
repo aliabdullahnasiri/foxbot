@@ -1,9 +1,11 @@
 # CLAUDE.md — Claude Code instructions for FoxBot
 
+Manual MT5 orders use an operator-supplied lot size on the connected terminal account. Account eligibility, real-mode opt-in, and portfolio risk controls described below apply only to the planned automated workflow. Manual submission requires explicit execution, a checked broker request, and a durable request ID.
+
 You are implementing **FoxBot**, not the older full ForexBot platform. Read `PROJECT_CONTEXT.md`, `docs/REQUIREMENTS.md`, `docs/SAFETY.md`, and `tasks/NEXT.md` first. `AGENTS.md` contains shared repository rules; follow them too.
 
 ## Principles
-- One Python process, one Telegram channel, one Windows MT5 demo terminal, local Ollama, no web app.
+- One Python process, one Telegram channel, one Windows MT5 terminal, local Ollama, no web app.
 - Simple functions and few files over abstract factories and premature extensibility.
 - Telethon for new-message listening; Ollama HTTP JSON extraction; deterministic verification; MT5 order checks and risk sizing.
 - Keep `ENABLE_TRADING=false` unless the operator changes it explicitly.
@@ -20,7 +22,7 @@ You are implementing **FoxBot**, not the older full ForexBot platform. Read `PRO
 5. Update tasks and summarize changed files and remaining concerns.
 
 ## Security
-Do not print or commit Telegram API credentials, session data, `.env`, MT5 credentials, or tokens. Do not execute trades against real accounts, including if the operator accidentally connects one.
+Do not print or commit Telegram API credentials, session data, `.env`, MT5 credentials, or tokens. Real-account orders require manual submission, explicitly selected real mode, a verified configured account, and separate opt-in.
 
 ## Reference
 Read `docs/ARCHITECTURE.md`, `docs/CONFIGURATION.md`, and `docs/TESTING.md` for integration details.
