@@ -1,5 +1,7 @@
 # Test Plan
 
+Manual MT5 orders use an operator-supplied lot size on the connected terminal account. Account eligibility, real-mode opt-in, and portfolio risk controls described below apply only to the planned automated workflow. Manual submission requires explicit execution, a checked broker request, and a durable request ID.
+
 Use `uv run pytest` with mocked Telethon, Ollama, and MT5; tests should not require real credentials, internet, or installed terminal.
 
 ## Parser
@@ -17,11 +19,11 @@ Use `uv run pytest` with mocked Telethon, Ollama, and MT5; tests should not requ
 
 ## MT5 and risk
 - Trading disabled means no `order_send` call.
-- Real or unknown account mode rejected.
+- Real submission requires explicit opt-in and matching configured credentials. Account-mode mismatches are rejected.
 - Broker suffix supported via configured symbol.
 - Correct side-specific quote (BUY ask / SELL bid).
 - Market price outside allowed tolerance rejected.
-- Daily-loss threshold, existing FoxBot position, required SL/TP, stale quote, spread cap, insufficient margin all block.
+- An existing FoxBot position, missing SL/TP, a stale quote, excessive spread, or insufficient margin blocks submission.
 - `order_calc_profit()` used for stop-loss sizing; volume steps floor; minimum lot rejected if oversized.
 - `order_check` failure blocks `order_send`; uncertain result requires reconciliation.
 
