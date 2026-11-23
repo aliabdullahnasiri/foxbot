@@ -1,6 +1,6 @@
 # Safety and Risk Policy (hard rules)
 
-Manual MT5 orders use an operator-supplied lot size on the connected terminal account. Account eligibility, real-mode opt-in, and portfolio risk controls described below apply only to the planned automated workflow. Manual submission requires explicit execution, a checked broker request, and a durable request ID.
+Manual MT5 orders use an operator-supplied lot size on the connected terminal account. Account eligibility, real-mode opt-in, and portfolio risk controls described below apply only to the planned automated workflow. Manual submission requires explicit execution and a checked broker request.
 
 **Default: demo mode and no execution.** This is an engineering test harness, not proof of profitable trading. Telegram provider win-rate claims are not verified.
 
@@ -13,7 +13,7 @@ Manual MT5 orders use an operator-supplied lot size on the connected terminal ac
 7. SELL SL must be greater than entry and TP1 less; BUY SL must be less than entry and TP1 greater. All TP values must be correctly oriented.
 8. Apply max signal age, quote freshness, spread and price-deviation thresholds; skip when violated. Prices thresholds measured in XAUUSD price units, not pips.
 9. Price sizing from MT5 `order_calc_profit` and broker lot step; round **down**. If min volume risks too much, skip. Reject when contract data/order checks are missing or inconsistent.
-10. Verify margin and trade permissions; never blindly retry an uncertain order submission. Preserve idempotency over restarts.
+10. Verify margin and trade permissions; never blindly retry an uncertain order submission.
 11. Credentials, Telegram session and trading records stay local and gitignored.
 12. Fail closed for connectivity, parser, database, MT5, and configuration errors.
 
