@@ -1,6 +1,6 @@
 # FoxBot v1 — Functional Requirements
 
-Manual MT5 orders use an operator-supplied lot size on the connected terminal account. Account eligibility, real-mode opt-in, and portfolio risk controls described below apply only to the planned automated workflow. Manual submission requires explicit execution, a checked broker request, and a durable request ID.
+Manual MT5 orders use an operator-supplied lot size on the connected terminal account. Account eligibility, real-mode opt-in, and portfolio risk controls described below apply only to the planned automated workflow. Manual submission requires explicit execution and a checked broker request.
 
 ## Dependencies
 
@@ -18,7 +18,7 @@ The acceptance criteria below describe the target for v1. [Implementation backlo
 ## Telegram
 - Authenticate as a user via API ID/hash and local Telethon session; monitor authorized channel only.
 - Handle only new messages after listener starts; ignore edits for automatic execution.
-- Filter obvious non-signals, preserve source channel/message IDs, and deduplicate durably.
+- Filter obvious non-signals, preserve source channel/message IDs.
 - Handle disconnections without replay-trading history.
 
 ## Ollama
@@ -42,7 +42,6 @@ The acceptance criteria below describe the target for v1. [Implementation backlo
 - Maximum planned risk is 0.5% of current equity per order.
 - Compute prospective stop loss with `mt5.order_calc_profit()` and budget for likely fees/slippage; never exceed cap by lot rounding.
 - At most one FoxBot XAUUSD position at once, verify against live MT5 positions.
-- Deduplicate `(channel_id,message_id)` via SQLite with durable processing state. Avoid double order on restart or uncertain outcomes.
 - Log skipped, parsed, rejected, submitted, and confirmed results.
 
 ## Acceptance
