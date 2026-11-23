@@ -1,6 +1,6 @@
-# Start Here — FoxBot Agent Pack
+# Start Here — FoxBot
 
-This ZIP contains **Markdown coding-agent guidance**, not application code. Copy its contents into the root of your `foxbot` repository.
+The Python package lives in `src/bot/`. Follow the README for local setup and commands. [README](README.md)
 
 **Codex:** Run `codex` from project root; Codex reads `AGENTS.md`.
 
@@ -17,5 +17,4 @@ Suggested instruction for either agent:
 4. `docs/SAFETY.md` — trading controls.
 5. `tasks/NEXT.md` — immediate task.
 
-## Important
-Do not use any old ForexBot 2.0 documents referring to PostgreSQL, FastAPI or an OpenAI API. This FoxBot project is deliberately much smaller.
+FoxBot uses FastAPI for liveness and local Ollama for signal extraction. [Architecture](docs/ARCHITECTURE.md)
