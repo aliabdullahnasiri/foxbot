@@ -250,10 +250,8 @@ def execution(bridge, tmp_path):
         MT5_PASSWORD="fixture-password",
         MT5_SLIPPAGE_ALLOWANCE="0.25",
         MT5_ROUND_TRIP_COST_PER_LOT="5",
-        STATE_DB_PATH=str(tmp_path / "orders.sqlite3"),
     )
     order = MarketOrder(
-        request_id="intent-1",
         side="buy",
         entry=Decimal(2500),
         stop=Decimal(2498),
@@ -265,7 +263,7 @@ def execution(bridge, tmp_path):
 
 @pytest.mark.parametrize("side,price", [("buy", 2500.25), ("sell", 2500)])
 def test_fixed_volume_order(execution, monkeypatch, side, price):
-    bridge, settings, order = execution
+    bridge, settings, _ = execution
     monkeypatch.setattr("bot.core.settings.get_settings", lambda: settings)
     bridge.remote.account_info.return_value = record(
         login=45, server="Other", trade_mode=2
@@ -280,8 +278,6 @@ def test_fixed_volume_order(execution, monkeypatch, side, price):
         "2498" if side == "buy" else "2504",
         "--tp",
         "2504" if side == "buy" else "2498",
-        "--request-id",
-        order.request_id,
     ]
     runner = CliRunner()
     preview = runner.invoke(main, args)
@@ -293,7 +289,6 @@ def test_fixed_volume_order(execution, monkeypatch, side, price):
     assert submitted.exit_code == 0, submitted.output
     request = bridge.remote.order_send.call_args.args[0]
     assert request["volume"] == 2 and request["price"] == price
-    assert "already submitted" in runner.invoke(main, args + ["--submit"]).output
     bridge.remote.order_send.assert_called_once()
     bridge.remote.order_calc_profit.assert_not_called()
     bridge.remote.order_calc_margin.assert_not_called()
@@ -306,28 +301,12 @@ def test_broker_check_failure_blocks_send(execution):
         MT5Service.execute_market_order(service, settings, order, submit=True)
 
 
-def test_uncertain_send_blocks_retry_until_reconciled(execution):
+def test_uncertain_send_reports_failure_without_retry(execution):
     bridge, settings, order = execution
     bridge.allow_send = True
     bridge.remote.order_send.side_effect = OSError("bridge disconnected")
-    with MT5Service() as service:
-        with pytest.raises(MT5ServiceError, match="uncertain"):
-            MT5Service.execute_market_order(service, settings, order, submit=True)
-        with pytest.raises(MT5ServiceError, match="unresolved"):
-            MT5Service.execute_market_order(service, settings, order, submit=True)
-        request = bridge.remote.order_send.call_args.args[0]
-        bridge.remote.history_deals_get.return_value = (
-            record(
-                comment=request["comment"],
-                symbol=SYMBOL,
-                magic=settings.MT5_MAGIC,
-                type=MetaTrader5.DEAL_TYPE_BUY,
-                entry=MetaTrader5.DEAL_ENTRY_IN,
-                ticket=123,
-            ),
-        )
-        with pytest.raises(MT5ServiceError, match="already submitted"):
-            MT5Service.execute_market_order(service, settings, order, submit=True)
+    with MT5Service() as service, pytest.raises(MT5ServiceError, match="uncertain"):
+        MT5Service.execute_market_order(service, settings, order, submit=True)
     bridge.remote.order_send.assert_called_once()
 
 

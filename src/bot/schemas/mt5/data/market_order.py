@@ -11,7 +11,6 @@ class MarketOrder(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
-    request_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
     side: Literal["buy", "sell"]
     entry: PositiveDecimal | None
     stop: PositiveDecimal

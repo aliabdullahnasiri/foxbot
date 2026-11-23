@@ -18,8 +18,7 @@ class Settings(BaseSettings):
     TELEGRAM_CHANNEL: str = ""
     TELEGRAM_SESSION: str = Field(default="foxbot.session", min_length=1)
 
-    # Redis and Celery
-    REDIS_URL: SecretStr = SecretStr("redis://localhost:6379/0")
+    # Celery broker
     CELERY_BROKER_URL: SecretStr = SecretStr("")
 
     # Ollama
@@ -46,9 +45,13 @@ class Settings(BaseSettings):
     MT5_SLIPPAGE_ALLOWANCE: Decimal | None = Field(default=None, gt=0)
     MT5_ROUND_TRIP_COST_PER_LOT: Decimal | None = Field(default=None, ge=0)
 
-    # Local state and logging
-    STATE_DB_PATH: str = "foxbot_state.sqlite3"
+    # Logging
     LOG_LEVEL: str = "INFO"
+
+    @property
+    def mt5_quote_utc_offset_seconds(self) -> int:
+        """Return the configured broker clock offset in seconds."""
+        return self.MT5_QUOTE_UTC_OFFSET_MINUTES * 60
 
     @field_validator("MT5_LOGIN", mode="before")
     @classmethod

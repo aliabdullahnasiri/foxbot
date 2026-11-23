@@ -44,7 +44,6 @@ def telegram_monitor() -> None:
 @click.option("--sl", required=True, help="Stop-loss price.")
 @click.option("--tp", required=True, help="Take-profit price.")
 @click.option("--entry", help="Optional reference price for entry deviation.")
-@click.option("--request-id", help="Stable ID for submission. Generated for previews.")
 @click.option("--submit", is_flag=True, help="Submit the order. Default is dry run.")
 def mt5_order(
     side: Literal["buy", "sell"],
@@ -52,7 +51,6 @@ def mt5_order(
     sl: str,
     tp: str,
     entry: str | None,
-    request_id: str | None,
     submit: bool,
 ) -> None:
     """Open a fixed-volume market position on the connected MT5 account."""
@@ -74,7 +72,6 @@ def mt5_order(
                 sl=Decimal(sl),
                 tp=Decimal(tp),
                 entry=Decimal(entry) if entry is not None else None,
-                request_id=request_id,
                 submit=submit,
                 settings=settings,
             )
@@ -87,5 +84,5 @@ def mt5_order(
     else:
         click.echo(
             f"Preview {side} {volume} lots at {result['price']}, SL {sl}, TP {tp}. "
-            f"To submit, add --request-id {result['request_id']} --submit."
+            "To submit, add --submit."
         )

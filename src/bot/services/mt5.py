@@ -3,15 +3,11 @@
 from __future__ import annotations
 
 import re
-import sqlite3
-from contextlib import closing
 from decimal import Decimal, InvalidOperation
-from hashlib import sha256
 from math import isfinite
 from time import time
 from types import TracebackType
 from typing import Any, Literal, Self
-from uuid import uuid4
 
 from mt5linux import MetaTrader5
 
@@ -212,10 +208,8 @@ class MT5Service:
         sl: float | Decimal | None = None,
         tp: float | Decimal | None = None,
         entry: float | Decimal | None = None,
-        request_id: str | None = None,
         submit: bool = False,
         settings: Settings | None = None,
-        comment: str | None = None,
     ) -> dict[str, Any]:
         """Preview or submit an order. Use the supplied lot volume."""
         settings = settings or get_settings()
@@ -223,13 +217,7 @@ class MT5Service:
             raise ValueError(f"Expected configured symbol {settings.MT5_SYMBOL}")
         if sl is None or tp is None:
             raise ValueError("Provide both a stop loss and a take profit")
-        request_id = request_id or comment
-        if submit and not request_id:
-            raise ValueError(
-                "Submission needs a stable request ID. Use --request-id ID"
-            )
         order = MarketOrder(
-            request_id=request_id or uuid4().hex,
             side=side,
             entry=self._decimal(entry, "entry") if entry is not None else None,
             stop=self._decimal(sl, "sl"),
@@ -245,9 +233,7 @@ class MT5Service:
         *,
         sl: float | Decimal | None = None,
         tp: float | Decimal | None = None,
-        comment: str | None = None,
         entry: float | Decimal | None = None,
-        request_id: str | None = None,
         submit: bool = False,
     ) -> dict[str, Any]:
         return self.market_order(
@@ -256,9 +242,7 @@ class MT5Service:
             volume,
             sl=sl,
             tp=tp,
-            comment=comment,
             entry=entry,
-            request_id=request_id,
             submit=submit,
         )
 
@@ -269,9 +253,7 @@ class MT5Service:
         *,
         sl: float | Decimal | None = None,
         tp: float | Decimal | None = None,
-        comment: str | None = None,
         entry: float | Decimal | None = None,
-        request_id: str | None = None,
         submit: bool = False,
     ) -> dict[str, Any]:
         return self.market_order(
@@ -280,9 +262,7 @@ class MT5Service:
             volume,
             sl=sl,
             tp=tp,
-            comment=comment,
             entry=entry,
-            request_id=request_id,
             submit=submit,
         )
 
@@ -294,49 +274,6 @@ class MT5Service:
             raise ValueError("MT5_MAGIC must be positive")
 
     @staticmethod
-    def _reconcile(
-        db: sqlite3.Connection, scope: str, mt5: MT5Service, now: int
-    ) -> None:
-        pending = db.execute(
-            "SELECT request_id, tag, created, symbol, magic, deal_type, broker_order "
-            "FROM mt5_requests "
-            "WHERE account = ? AND status = 'pending'",
-            (scope,),
-        ).fetchall()
-        for request_id, tag, created, symbol, magic, deal_type, broker_order in pending:
-            deals = mt5.deals_between(created, now)
-            matched = next(
-                (
-                    deal
-                    for deal in deals
-                    if (
-                        (
-                            deal.get("comment") == tag
-                            or (broker_order and deal.get("order") == broker_order)
-                        )
-                        and deal.get("symbol") == symbol
-                        and deal.get("magic") == magic
-                        and deal.get("type") == deal_type
-                        and deal.get("entry") == mt5.mt5.DEAL_ENTRY_IN
-                        and type(deal.get("ticket")) is int
-                        and deal["ticket"] > 0
-                    )
-                ),
-                None,
-            )
-            if matched is not None:
-                db.execute(
-                    "UPDATE mt5_requests SET status = 'filled', broker_deal = ? "
-                    "WHERE account = ? AND request_id = ?",
-                    (matched["ticket"], scope, request_id),
-                )
-            else:
-                raise MT5ServiceError(
-                    f"Request {request_id} has an unresolved outcome. "
-                    "Check broker history and positions before placing another order"
-                )
-
-    @staticmethod
     def _quote(mt5: MT5Service, settings: Settings) -> dict[str, Any]:
         tick = mt5.tick(settings.MT5_SYMBOL)
         stamp = tick.get("time_msc")
@@ -344,7 +281,7 @@ class MT5Service:
             raise MT5ServiceError(
                 f"MT5 returned no valid tick timestamp for {settings.MT5_SYMBOL}"
             )
-        quote_utc = stamp / 1000 - settings.MT5_QUOTE_UTC_OFFSET_MINUTES * 60
+        quote_utc = stamp / 1000 - settings.mt5_quote_utc_offset_seconds
         age = time() - quote_utc
         if age < 0:
             raise MT5ServiceError(
@@ -359,10 +296,7 @@ class MT5Service:
         return tick
 
     @staticmethod
-    def _record_result(
-        db: sqlite3.Connection,
-        scope: str,
-        request_id: str,
+    def _order_result(
         mt5: MT5Service,
         result: dict[str, Any] | None,
     ) -> dict[str, Any]:
@@ -387,22 +321,9 @@ class MT5Service:
             api.TRADE_RETCODE_PRICE_CHANGED,
         ):
             status = "rejected"
-        with db:
-            db.execute(
-                "UPDATE mt5_requests SET status = ?, broker_order = ?, broker_deal = ?, retcode = ? "
-                "WHERE account = ? AND request_id = ? AND status = 'pending'",
-                (
-                    status,
-                    result.get("order"),
-                    result.get("deal"),
-                    retcode,
-                    scope,
-                    request_id,
-                ),
-            )
         if status == "pending":
             raise MT5ServiceError(
-                f"Request {request_id} has an uncertain result ({retcode}). Do not resend"
+                f"Order has an uncertain result ({retcode}). Do not resend"
             )
         if status == "rejected":
             reason = (
@@ -410,131 +331,72 @@ class MT5Service:
                 if result.get("guard_blocked")
                 else f"retcode {retcode}"
             )
-            raise MT5ServiceError(f"Request {request_id} was rejected ({reason})")
-        return {"status": status, "request_id": request_id, **result}
+            raise MT5ServiceError(f"Order was rejected ({reason})")
+        return {"status": status, **result}
 
     @staticmethod
     def execute_market_order(
         mt5: MT5Service, settings: Settings, order: MarketOrder, *, submit: bool = False
     ) -> dict[str, Any]:
-        """Check a manual order or place it once with durable recovery state."""
+        """Check a manual order and optionally submit it once."""
         MT5Service._validate_settings(settings)
         if submit and not settings.ENABLE_TRADING:
             raise MT5ServiceError("Order submission requires ENABLE_TRADING=true")
-        if not settings.STATE_DB_PATH or settings.STATE_DB_PATH == ":memory:":
-            raise MT5ServiceError("MT5 order state requires a persistent SQLite file")
-        try:
-            with closing(sqlite3.connect(settings.STATE_DB_PATH)) as db:
-                return MT5Service._execute(db, mt5, settings, order, submit=submit)
-        except sqlite3.Error as exc:
-            raise MT5ServiceError(
-                f"Cannot access or update MT5 order state for {order.request_id}. Check the journal before retrying"
-            ) from exc
 
-    @staticmethod
-    def _execute(
-        db: sqlite3.Connection,
-        mt5: MT5Service,
-        settings: Settings,
-        order: MarketOrder,
-        *,
-        submit: bool,
-    ) -> dict[str, Any]:
-        now = int(time())
-        # Preserve existing journal keys across upgrades. Account metadata only namespaces requests.
-        account = mt5.account()
-        scope = repr(
-            tuple(account.get(key) for key in ("login", "server", "trade_mode"))
-        )
-        tag = "FB-" + sha256(f"{scope}:{order.request_id}".encode()).hexdigest()[:24]
-        db.execute(
-            "CREATE TABLE IF NOT EXISTS mt5_requests ("
-            "account TEXT, request_id TEXT, tag TEXT, created INTEGER, symbol TEXT, "
-            "magic INTEGER, deal_type INTEGER, status TEXT, broker_order INTEGER, "
-            "broker_deal INTEGER, retcode INTEGER, PRIMARY KEY (account, request_id))"
-        )
-        with db:
-            db.execute("BEGIN IMMEDIATE")
-            MT5Service._reconcile(db, scope, mt5, now)
-        with db:
-            db.execute("BEGIN IMMEDIATE")
-            MT5Service._reconcile(db, scope, mt5, now)
-            if db.execute(
-                "SELECT 1 FROM mt5_requests WHERE account=? AND request_id=?",
-                (scope, order.request_id),
-            ).fetchone():
-                raise MT5ServiceError(
-                    f"Request {order.request_id} was already submitted"
-                )
-
-            tick = MT5Service._quote(mt5, settings)
-            bid, ask = Decimal(str(tick["bid"])), Decimal(str(tick["ask"]))
-            price = ask if order.side == "buy" else bid
-            if ask - bid > settings.MAX_SPREAD:
-                raise MT5ServiceError("Spread exceeds MAX_SPREAD")
-            if (
-                order.entry is not None
-                and abs(price - order.entry) > settings.MAX_ENTRY_DEVIATION
-            ):
-                raise MT5ServiceError("Price exceeds MAX_ENTRY_DEVIATION")
-            info = mt5.symbol_info(settings.MT5_SYMBOL)
-            request = {
-                "action": mt5.mt5.TRADE_ACTION_DEAL,
-                "symbol": settings.MT5_SYMBOL,
-                "volume": mt5._volume(info, order.volume),
-                "type": mt5.mt5.ORDER_TYPE_BUY
+        tick = MT5Service._quote(mt5, settings)
+        bid, ask = Decimal(str(tick["bid"])), Decimal(str(tick["ask"]))
+        price = ask if order.side == "buy" else bid
+        if ask - bid > settings.MAX_SPREAD:
+            raise MT5ServiceError("Spread exceeds MAX_SPREAD")
+        if (
+            order.entry is not None
+            and abs(price - order.entry) > settings.MAX_ENTRY_DEVIATION
+        ):
+            raise MT5ServiceError("Price exceeds MAX_ENTRY_DEVIATION")
+        info = mt5.symbol_info(settings.MT5_SYMBOL)
+        request = {
+            "action": mt5.mt5.TRADE_ACTION_DEAL,
+            "symbol": settings.MT5_SYMBOL,
+            "volume": mt5._volume(info, order.volume),
+            "type": (
+                mt5.mt5.ORDER_TYPE_BUY
                 if order.side == "buy"
-                else mt5.mt5.ORDER_TYPE_SELL,
-                "price": float(price),
-                "sl": float(order.stop),
-                "tp": float(order.target),
-                "magic": settings.MT5_MAGIC,
-                "deviation": mt5.deviation,
-                "type_time": mt5.mt5.ORDER_TIME_GTC,
-                "type_filling": mt5.get_filling_mode(settings.MT5_SYMBOL),
-                "comment": tag,
-            }
+                else mt5.mt5.ORDER_TYPE_SELL
+            ),
+            "price": float(price),
+            "sl": float(order.stop),
+            "tp": float(order.target),
+            "magic": settings.MT5_MAGIC,
+            "deviation": mt5.deviation,
+            "type_time": mt5.mt5.ORDER_TIME_GTC,
+            "type_filling": mt5.get_filling_mode(settings.MT5_SYMBOL),
+            "comment": "FoxBot",
+        }
 
-            def call(method: str) -> dict[str, Any]:
-                result = mt5._eval(
-                    "(lambda row: {k: v for k, v in row._asdict().items() if k != 'request'} "
-                    f"if row is not None else None)(mt5.{method}({request!r}))"
-                )
-                if result is None:
-                    raise MT5ServiceError(f"{method} failed: {mt5.last_error()}")
-                return result
+        def call(method: str) -> dict[str, Any]:
+            result = mt5._eval(
+                "(lambda row: {k: v for k, v in row._asdict().items() if k != 'request'} "
+                f"if row is not None else None)(mt5.{method}({request!r}))"
+            )
+            if result is None:
+                raise MT5ServiceError(f"{method} failed: {mt5.last_error()}")
+            return result
 
-            check = call("order_check")
-            if check.get("retcode") != 0:
-                raise MT5ServiceError(
-                    f"Broker order check failed: {check.get('comment')}"
-                )
-            if not submit:
-                return {"status": "dry_run", "request_id": order.request_id, **request}
-            deal_type = (
-                mt5.mt5.DEAL_TYPE_BUY if order.side == "buy" else mt5.mt5.DEAL_TYPE_SELL
+        check = call("order_check")
+        if check.get("retcode") != 0:
+            raise MT5ServiceError(
+                f"Broker order check failed: {check.get('comment')}"
             )
-            db.execute(
-                "INSERT INTO mt5_requests (account, request_id, tag, created, symbol, magic, deal_type, status) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')",
-                (
-                    scope,
-                    order.request_id,
-                    tag,
-                    now,
-                    settings.MT5_SYMBOL,
-                    settings.MT5_MAGIC,
-                    deal_type,
-                ),
-            )
+        if not submit:
+            return {"status": "dry_run", **request}
 
         try:
             result = call("order_send")
         except MT5ServiceError as exc:
             raise MT5ServiceError(
-                f"Request {order.request_id} has an uncertain outcome. Do not resend"
+                "Order has an uncertain outcome. Do not resend"
             ) from exc
-        return MT5Service._record_result(db, scope, order.request_id, mt5, result)
+        return MT5Service._order_result(mt5, result)
 
 
 execute_market_order = MT5Service.execute_market_order
