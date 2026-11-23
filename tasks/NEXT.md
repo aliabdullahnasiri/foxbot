@@ -4,7 +4,7 @@
 
 Read `PROJECT_CONTEXT.md`, `AGENTS.md`, `CLAUDE.md`, and `docs/REQUIREMENTS.md`. Inspect the repository first; don't overwrite existing correct work.
 
-Create a Python 3.12 project with `uv`, minimal pinned/locked dependencies, `.env.example`, `.gitignore`, readable `config.py`, a startup `main.py` that prints sanitized startup configuration, and README setup steps for Windows MT5 + local Ollama. Include `ENABLE_TRADING=false` and reject any configuration that would imply live trading. Add basic config tests. Do **not** connect to Telegram or send MT5 orders in this first task.
+The Python 3.12 foundation uses `uv`, locked dependencies, `.env.example`, `.gitignore`, typed configuration in `src/bot/core/settings.py`, and the installed `bot` CLI. Keep `ENABLE_TRADING=false` and reject live trading configurations. Verify the foundation with the CLI help and configuration tests before closing T01.
 
 Run available tests and linting; report exact commands and results. Update `tasks/BACKLOG.md` when T01 is done and replace this file with the next task (T02).
 
@@ -39,3 +39,9 @@ The Ollama client loads its signal extraction instructions from `bot/prompts/sig
 T02 is complete. Ollama output passes through the EMS-style signal data schema before logging. T03 still requires independent source-text verification.
 
 The Telegram worker uses the validated signal returned by the Ollama client so integer and fractional prices retain their exact decimal values.
+
+The synchronous MT5 adapter in `bot.services.mt5` has mocked coverage for connection, demo validation, broker queries, order checks, and request construction. T06 still tracks Windows terminal verification. Submission remains gated on T05, T07, and T08.
+
+Settings loads the MT5 demo login, masked password, and server from the local environment. The example configuration documents the three fields.
+
+MT5 settings tests use a temporary working directory and the standard settings constructor to isolate dotenv loading.
