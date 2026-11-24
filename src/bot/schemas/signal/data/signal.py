@@ -22,7 +22,7 @@ class SignalData(BaseModel):
         if self.side == "BUY":
             if not self.stop_loss < self.entry_price < min(self.take_profits):
                 raise ValueError(
-                    "BUY requires SL below entry and every TP above entry."
+                    "BUY requires SL below entry and every TP above entry.",
                 )
         elif not max(self.take_profits) < self.entry_price < self.stop_loss:
             raise ValueError("SELL requires SL above entry and every TP below entry.")
