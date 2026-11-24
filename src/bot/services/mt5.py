@@ -435,18 +435,7 @@ class MT5Service:
         info = mt5.symbol_info(settings.MT5_SYMBOL)
         managed_account = None
         if order.milestones:
-            levels = (price, *order.milestones, order.target)
-            for previous, current in pairwise(levels):
-                if current <= previous if order.side == "buy" else current >= previous:
-                    raise ValueError(
-                        "Targets must progress from market price in profit order"
-                    )
-            if order.entry is not None and (
-                order.milestones[0] <= order.entry
-                if order.side == "buy"
-                else order.milestones[0] >= order.entry
-            ):
-                raise ValueError("First target must be beyond intended entry")
+            mt5._validate_targets(order, price)
             account = mt5.account()
             if submit:
                 managed_account = mt5._account_identity(account)
@@ -483,6 +472,21 @@ class MT5Service:
         return result
 
     @staticmethod
+    def _validate_targets(order: MarketOrder, price: Decimal) -> None:
+        levels = (price, *order.milestones, order.target)
+        for previous, current in pairwise(levels):
+            if current <= previous if order.side == "buy" else current >= previous:
+                raise ValueError(
+                    "Targets must progress from market price in profit order"
+                )
+        if order.entry is not None and (
+            order.milestones[0] <= order.entry
+            if order.side == "buy"
+            else order.milestones[0] >= order.entry
+        ):
+            raise ValueError("First target must be beyond intended entry")
+
+    @staticmethod
     def _account_identity(account: dict[str, Any]) -> tuple[int, str]:
         login, server = account.get("login"), account.get("server")
         if (
@@ -513,15 +517,61 @@ class MT5Service:
             )
         fill = self._decimal(result.get("price", 0), "MT5 fill price")
         pending = list(pairwise((fill, *targets[:-1])))
-        symbol = settings.MT5_SYMBOL
         buy = side == "buy"
         monitoring = False
-        failures = 0
         while pending:
+            snapshot = self._monitor_snapshot(settings, order_ticket, result, on_event)
+            if snapshot is None:
+                if not monitoring:
+                    raise MT5ServiceError(
+                        f"Cannot identify open position for filled deal {deal}. "
+                        "Inspect MT5"
+                    )
+                if on_event is not None:
+                    on_event(
+                        "Position closed", f"Position {order_ticket} is no longer open"
+                    )
+                return
+            position, tick, info = snapshot
+            monitoring = True
+            if (
+                self.position_side(position["type"]) != side
+                or position["magic"] != settings.MT5_MAGIC
+                or Decimal(str(position["tp"])) != targets[-1]
+            ):
+                raise MT5ServiceError("Position changed during stop management")
+            price = Decimal(str(tick["bid" if buy else "ask"]))
+            distance = Decimal(str(info["point"])) * max(
+                info["trade_stops_level"], info["trade_freeze_level"]
+            )
+            stop = self._advance_stop(
+                position,
+                price,
+                distance,
+                pending,
+                final_target=targets[-1],
+                settings=settings,
+                buy=buy,
+                on_event=on_event,
+            )
+            if on_quote is not None:
+                on_quote(price, stop, pending[0][1] if pending else None)
+            if pending:
+                sleep(0.25)
+
+    def _monitor_snapshot(
+        self,
+        settings: Settings,
+        order_ticket: int,
+        result: dict[str, Any],
+        on_event: Callable[[str, str], None] | None,
+    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]] | None:
+        symbol = settings.MT5_SYMBOL
+        failures = 0
+        while True:
             try:
                 if failures:
                     sleep(failures)
-                    # Restore the native terminal IPC session on the existing bridge.
                     if not self._eval("mt5.initialize(timeout=5000)"):
                         raise self._read_error("initialize")
                     if self._account_identity(self.account()) != result.get(
@@ -533,13 +583,21 @@ class MT5Service:
                 rows = [
                     p for p in self.positions(symbol) if p["identifier"] == order_ticket
                 ]
-                if rows:
-                    tick = self._quote(self, settings)
-                    info = self.symbol_info(symbol)
+                if len(rows) > 1:
+                    raise MT5ServiceError(
+                        "Cannot identify open position for filled deal "
+                        f"{result['deal']}. Inspect MT5"
+                    )
+                snapshot = (
+                    (rows[0], self._quote(self, settings), self.symbol_info(symbol))
+                    if rows
+                    else None
+                )
             except MT5IPCError as exc:
                 if failures >= 3:
                     raise MT5ServiceError(
-                        f"Terminal IPC recovery failed for deal {deal}. Inspect MT5. {exc}"
+                        f"Terminal IPC recovery failed for deal {result['deal']}. "
+                        f"Inspect MT5. {exc}"
                     ) from exc
                 failures += 1
                 if on_event:
@@ -553,63 +611,51 @@ class MT5Service:
                     "Reconnected",
                     "Verified original account and refreshed position data",
                 )
-            failures = 0
-            if not rows and monitoring:
-                if on_event is not None:
-                    on_event(
-                        "Position closed", f"Position {order_ticket} is no longer open"
-                    )
-                return
-            if len(rows) != 1:
-                raise MT5ServiceError(
-                    f"Cannot identify open position for filled deal {deal}. Inspect MT5"
+            return snapshot
+
+    def _advance_stop(
+        self,
+        position: dict[str, Any],
+        price: Decimal,
+        distance: Decimal,
+        pending: list[tuple[Decimal, Decimal]],
+        *,
+        final_target: Decimal,
+        settings: Settings,
+        buy: bool,
+        on_event: Callable[[str, str], None] | None,
+    ) -> Decimal:
+        stop = Decimal(str(position["sl"]))
+        eligible = [
+            (index, new_stop)
+            for index, (new_stop, trigger) in enumerate(pending)
+            if (price >= trigger if buy else price <= trigger)
+            and (price - new_stop if buy else new_stop - price) > distance
+        ]
+        if eligible:
+            index, target = eligible[-1]
+            if on_event is not None:
+                on_event(
+                    "Target reached",
+                    f"Trigger {pending[index][1]} at quote {price}",
                 )
-            position = rows[0]
-            monitoring = True
-            if (
-                self.position_side(position["type"]) != side
-                or position["magic"] != settings.MT5_MAGIC
-                or Decimal(str(position["tp"])) != targets[-1]
-            ):
-                raise MT5ServiceError("Position changed during stop management")
-            price = Decimal(str(tick["bid" if buy else "ask"]))
-            distance = Decimal(str(info["point"])) * max(
-                info["trade_stops_level"], info["trade_freeze_level"]
-            )
-            stop = Decimal(str(position["sl"]))
-            eligible = [
-                (index, new_stop)
-                for index, (new_stop, trigger) in enumerate(pending)
-                if (price >= trigger if buy else price <= trigger)
-                and (price - new_stop if buy else new_stop - price) > distance
-            ]
-            if eligible:
-                index, target = eligible[-1]
+            if stop == 0 or (target > stop if buy else target < stop):
+                self._checked_request(
+                    {
+                        "action": self.mt5.TRADE_ACTION_SLTP,
+                        "symbol": settings.MT5_SYMBOL,
+                        "position": position["ticket"],
+                        "sl": float(target),
+                        "tp": float(final_target),
+                        "magic": settings.MT5_MAGIC,
+                    },
+                    submit=True,
+                )
                 if on_event is not None:
-                    on_event(
-                        "Target reached",
-                        f"Trigger {pending[index][1]} at quote {price}",
-                    )
-                if stop == 0 or (target > stop if buy else target < stop):
-                    self._checked_request(
-                        {
-                            "action": self.mt5.TRADE_ACTION_SLTP,
-                            "symbol": symbol,
-                            "position": position["ticket"],
-                            "sl": float(target),
-                            "tp": float(targets[-1]),
-                            "magic": settings.MT5_MAGIC,
-                        },
-                        submit=True,
-                    )
-                    if on_event is not None:
-                        on_event("Stop updated", f"Broker accepted SL {target}")
-                    stop = target
-                pending = pending[index + 1 :]
-            if on_quote is not None:
-                on_quote(price, stop, pending[0][1] if pending else None)
-            if pending:
-                sleep(0.25)
+                    on_event("Stop updated", f"Broker accepted SL {target}")
+                stop = target
+            del pending[: index + 1]
+        return stop
 
     def _checked_request(
         self, request: dict[str, Any], *, submit: bool
