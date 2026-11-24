@@ -7,6 +7,7 @@ from unittest.mock import Mock
 import pytest
 from click.testing import CliRunner
 from mt5linux import MetaTrader5
+from pydantic import ValidationError
 
 from bot.core.cli import main
 from bot.core.settings import Settings
@@ -33,7 +34,7 @@ def bridge(monkeypatch):
                 login=1234,
                 trade_allowed=True,
                 trade_expert=True,
-            )
+            ),
         ),
         last_error=Mock(return_value=(-1, "terminal error")),
         symbol_info=Mock(
@@ -44,7 +45,7 @@ def bridge(monkeypatch):
                 volume_min=0.01,
                 volume_max=10,
                 volume_step=0.01,
-            )
+            ),
         ),
         symbol_select=Mock(return_value=True),
         symbol_info_tick=Mock(return_value=record(bid=2500, ask=2500.25)),
@@ -58,7 +59,7 @@ def bridge(monkeypatch):
                     sl=2490,
                     tp=2510,
                 ),
-            )
+            ),
         ),
         orders_get=Mock(return_value=(record(ticket=17, symbol=SYMBOL),)),
         history_deals_get=Mock(return_value=(record(ticket=23, position_id=42),)),
@@ -72,12 +73,16 @@ def bridge(monkeypatch):
     client.initialize.return_value = True
     client.login.return_value = True
     client.eval.side_effect = lambda expression: eval(
-        expression, {"mt5": remote, "__builtins__": {"dict": dict}}
+        expression,
+        {"mt5": remote, "__builtins__": {"dict": dict}},
     )
     factory = Mock(return_value=client)
     monkeypatch.setattr(mt5, "MetaTrader5", factory)
     bridge = SimpleNamespace(
-        remote=remote, client=client, factory=factory, allow_send=False
+        remote=remote,
+        client=client,
+        factory=factory,
+        allow_send=False,
     )
     yield bridge
     if not bridge.allow_send:
@@ -92,14 +97,20 @@ def service(bridge):
 
 def test_connect_and_disconnect(bridge):
     service = MT5Service(
-        "mt5.local", 18813, login=1234, password="test-password", server="Demo"
+        "mt5.local",
+        18813,
+        login=1234,
+        password="test-password",
+        server="Demo",
     )
     assert service.connect() is service
     assert service.mt5 is bridge.client
     bridge.factory.assert_called_once_with(host="mt5.local", port=18813)
     bridge.client.initialize.assert_called_once_with()
     bridge.client.login.assert_called_once_with(
-        1234, password="test-password", server="Demo"
+        1234,
+        password="test-password",
+        server="Demo",
     )
     with pytest.raises(MT5ServiceError, match="Already connected"):
         service.connect()
@@ -119,7 +130,8 @@ def test_context_manager_cleans_up_on_error(bridge):
 
 
 @pytest.mark.parametrize(
-    "credentials", [{"login": 1234}, {"password": ""}, {"server": "Demo"}]
+    "credentials",
+    [{"login": 1234}, {"password": ""}, {"server": "Demo"}],
 )
 def test_connect_rejects_partial_credentials(bridge, credentials):
     with pytest.raises(ValueError, match="together"):
@@ -131,14 +143,14 @@ def test_connect_rejects_partial_credentials(bridge, credentials):
 def test_connect_handles_terminal_failure(bridge, stage):
     getattr(bridge.client, stage).return_value = False
     service = MT5Service(login=1234, password="test-password", server="Demo")
-    with pytest.raises(MT5ServiceError, match="MT5 .* failed"):
+    with pytest.raises(MT5ServiceError, match=r"MT5 .* failed"):
         service.connect()
     bridge.client.shutdown.assert_called_once_with()
 
 
 def test_connect_sanitizes_bridge_failure(bridge):
     bridge.factory.side_effect = OSError("bridge details")
-    with pytest.raises(MT5ServiceError, match="^MT5 connection failed$"):
+    with pytest.raises(MT5ServiceError, match=r"^MT5 connection failed$"):
         MT5Service().connect()
     bridge.client.shutdown.assert_not_called()
 
@@ -174,7 +186,7 @@ def test_symbol_info_selects_hidden_symbol(service, bridge):
 def test_symbol_info_rejects_unavailable_symbol(service, bridge, selects):
     bridge.remote.symbol_info.return_value = record(visible=False)
     bridge.remote.symbol_select.return_value = selects
-    with pytest.raises(MT5ServiceError, match="Cannot enable|still not visible"):
+    with pytest.raises(MT5ServiceError, match=r"Cannot enable|still not visible"):
         service.symbol_info(SYMBOL)
 
 
@@ -219,26 +231,34 @@ def execution(bridge, tmp_path):
         volume_step=0.01,
     )
     remote.symbol_info_tick.return_value = record(
-        bid=2500, ask=2500.25, time_msc=int(time() * 1000)
+        bid=2500,
+        ask=2500.25,
+        time_msc=int(time() * 1000),
     )
     remote.terminal_info = Mock(
-        return_value=record(connected=True, trade_allowed=True, tradeapi_disabled=False)
+        return_value=record(
+            connected=True, trade_allowed=True, tradeapi_disabled=False
+        ),
     )
     remote.positions_get.return_value = ()
     remote.orders_get.return_value = ()
     remote.history_deals_get.return_value = ()
     remote.order_calc_profit = Mock(
-        side_effect=lambda side, symbol, lots, entry, stop: (
+        side_effect=lambda _side, _symbol, lots, entry, stop: (
             -round(abs(entry - stop) * lots * 100, 8)
-        )
+        ),
     )
     remote.order_calc_margin = Mock(return_value=100)
     remote.order_check.return_value = record(
-        retcode=0, margin_free=9900, request=object()
+        retcode=0,
+        margin_free=9900,
+        request=object(),
     )
     remote.order_send.side_effect = None
     remote.order_send.return_value = record(
-        retcode=api.TRADE_RETCODE_DONE, deal=123, order=456
+        retcode=api.TRADE_RETCODE_DONE,
+        deal=123,
+        order=456,
     )
     settings = Settings(
         _env_file=None,
@@ -261,12 +281,14 @@ def execution(bridge, tmp_path):
     return bridge, settings, order
 
 
-@pytest.mark.parametrize("side,price", [("buy", 2500.25), ("sell", 2500)])
+@pytest.mark.parametrize(("side", "price"), [("buy", 2500.25), ("sell", 2500)])
 def test_fixed_volume_order(execution, monkeypatch, side, price):
     bridge, settings, _ = execution
     monkeypatch.setattr("bot.core.settings.get_settings", lambda: settings)
     bridge.remote.account_info.return_value = record(
-        login=45, server="Other", trade_mode=2
+        login=45,
+        server="Other",
+        trade_mode=2,
     )
     args = [
         "mt5",
@@ -285,10 +307,11 @@ def test_fixed_volume_order(execution, monkeypatch, side, price):
     assert str(price) in preview.output
     bridge.remote.order_send.assert_not_called()
     bridge.allow_send = True
-    submitted = runner.invoke(main, args + ["--submit"])
+    submitted = runner.invoke(main, [*args, "--submit"])
     assert submitted.exit_code == 0, submitted.output
     request = bridge.remote.order_send.call_args.args[0]
-    assert request["volume"] == 2 and request["price"] == price
+    assert request["volume"] == 2
+    assert request["price"] == price
     bridge.remote.order_send.assert_called_once()
     bridge.remote.order_calc_profit.assert_not_called()
     bridge.remote.order_calc_margin.assert_not_called()
@@ -311,11 +334,10 @@ def test_uncertain_send_reports_failure_without_retry(execution):
 
 
 @pytest.mark.parametrize(
-    "changes", [{"volume": Decimal(0)}, {"stop": Decimal(2501)}, {"side": "hold"}]
+    "changes",
+    [{"volume": Decimal(0)}, {"stop": Decimal(2501)}, {"side": "hold"}],
 )
 def test_market_order_schema_rejects_invalid_fields(execution, changes):
-    from pydantic import ValidationError
-
     _, _, order = execution
     with pytest.raises(ValidationError):
         MarketOrder.model_validate(order.model_dump() | changes)
@@ -327,7 +349,8 @@ def test_nested_market_order(execution, monkeypatch, side):
     monkeypatch.setattr("bot.core.settings.get_settings", lambda: settings)
     stop, target = ("2498", "2504") if side == "buy" else ("2504", "2498")
     result = CliRunner().invoke(
-        main, ["mt5", "order", side, "--volume", "0.02", "--sl", stop, "--tp", target]
+        main,
+        ["mt5", "order", side, "--volume", "0.02", "--sl", stop, "--tp", target],
     )
     assert result.exit_code == 0, result.output
     assert f"Preview {side} 0.02 lots" in result.output
@@ -367,24 +390,30 @@ def test_list_and_close_position(execution, monkeypatch, is_buy):
     )
     runner = CliRunner()
     args = ["mt5", "order"]
-    all_positions = runner.invoke(main, args + ["list"])
-    assert all_positions.exit_code == 0 and SYMBOL in all_positions.output
-    listed = runner.invoke(main, args + ["list", "--ticket", "42"])
-    assert listed.exit_code == 0 and SYMBOL in listed.output
+    all_positions = runner.invoke(main, [*args, "list"])
+    assert all_positions.exit_code == 0
+    assert SYMBOL in all_positions.output
+    listed = runner.invoke(main, [*args, "list", "--ticket", "42"])
+    assert listed.exit_code == 0
+    assert SYMBOL in listed.output
     for cell in ("Open positions", "Ticket", "Symbol", "Side", "Lots", "42", "0.02"):
         assert cell in listed.output
-    empty = runner.invoke(main, args + ["list", "--ticket", "43"])
-    assert empty.exit_code == 0 and "No matching open positions." in empty.output
-    missing = runner.invoke(main, args + ["close", "43", "--submit"])
-    assert missing.exit_code == 1 and "43" in missing.output
-    preview = runner.invoke(main, args + ["close", "42"])
-    assert preview.exit_code == 0 and "Preview close 42" in preview.output
+    empty = runner.invoke(main, [*args, "list", "--ticket", "43"])
+    assert empty.exit_code == 0
+    assert "No matching open positions." in empty.output
+    missing = runner.invoke(main, [*args, "close", "43", "--submit"])
+    assert missing.exit_code == 1
+    assert "43" in missing.output
+    preview = runner.invoke(main, [*args, "close", "42"])
+    assert preview.exit_code == 0
+    assert "Preview close 42" in preview.output
     bridge.remote.order_send.assert_not_called()
     bridge.allow_send = True
-    submitted = runner.invoke(main, args + ["close", "42", "--submit"])
+    submitted = runner.invoke(main, [*args, "close", "42", "--submit"])
     assert submitted.exit_code == 0, submitted.output
     request = bridge.remote.order_send.call_args.args[0]
     assert request == bridge.remote.order_check.call_args.args[0]
-    assert request["position"] == 42 and request["volume"] == 0.02
+    assert request["position"] == 42
+    assert request["volume"] == 0.02
     assert request["type"] == (api.ORDER_TYPE_SELL if is_buy else api.ORDER_TYPE_BUY)
     assert request["price"] == (2500 if is_buy else 2500.25)
