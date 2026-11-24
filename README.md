@@ -18,7 +18,19 @@ Run `uv run uvicorn bot:main --factory --reload` from the repository root.
 
 ## Manual MT5 orders
 
-Preview a market position with `uv run bot mt5-order --side buy --volume LOTS --sl STOP --tp TARGET`. Manual orders use the specified lot size on the connected terminal account, including real accounts. [Manual submission](docs/CONFIGURATION.md#manual-mt5-orders)
+Preview a market position with `uv run bot mt5 order buy --volume LOTS --sl STOP --tp TARGET`. Manual orders use the specified lot size on the connected terminal account, including real accounts. [Manual submission](docs/CONFIGURATION.md#manual-mt5-orders)
+
+
+```bash
+uv run bot mt5 order sell --volume 0.02 --sl 3670 --tp 3660 --submit
+uv run bot mt5 order list
+uv run bot mt5 order list --ticket 12345
+uv run bot mt5 order close 12345
+uv run bot mt5 order close 12345 --submit
+```
+
+Use `uv run bot mt5 order list` to see a table of position tickets, symbols, sides, and lot sizes for the configured symbol, or add `--ticket TICKET` to filter. Preview a full close with `uv run bot mt5 order close TICKET`. Both opening and closing require `--submit` and `ENABLE_TRADING=true` to execute. Use `uv run bot mt5 order --help` to see all commands.
+
 
 ## Project structure
 
