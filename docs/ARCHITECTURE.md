@@ -46,7 +46,7 @@ Authorized Telegram channel
 Use `MT5Service` as a context manager to shut down the terminal connection. Independent source-text verification remains planned. [Implementation backlog](../tasks/BACKLOG.md)
 
 ## Operational notes
-- Manual market orders enter through `bot mt5-order`. The command uses the connected account and checks the broker request before sending. The Telegram monitor logs extractions. Pending-order placement is outside FoxBot v1.
+- Manual market orders enter through `bot mt5 order`. The command uses the connected account and checks the broker request before sending. The Telegram monitor logs extractions. Pending-order placement is outside FoxBot v1.
 - `MetaTrader5` calls are synchronous; use one serialized worker or `asyncio.to_thread` with careful synchronization to avoid overlapping trade submissions.
 - Do not mark uncertain execution as safe to resend. Reconcile using trade history, open positions, magic number; require manual intervention if unresolved.
 - Recheck safety conditions directly before order submission (TOCTOU protection).
