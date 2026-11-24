@@ -6,13 +6,15 @@ import re
 from decimal import Decimal, InvalidOperation
 from math import isfinite
 from time import time
-from types import TracebackType
-from typing import Any, Literal, Self
+from typing import TYPE_CHECKING, Any, Literal, Self
 
 from mt5linux import MetaTrader5
 
 from bot.core.settings import Settings, get_settings
 from bot.schemas.mt5.data.market_order import MarketOrder
+
+if TYPE_CHECKING:
+    from types import TracebackType
 
 
 class MT5ServiceError(RuntimeError):
@@ -74,7 +76,9 @@ class MT5Service:
             if not self.mt5.initialize():
                 raise MT5ServiceError(f"MT5 initialization failed: {self.last_error()}")
             if self.login is not None and not self.mt5.login(
-                self.login, password=self.password, server=self.server
+                self.login,
+                password=self.password,
+                server=self.server,
             ):
                 raise MT5ServiceError("MT5 login failed")
         except BaseException as exc:
@@ -110,7 +114,7 @@ class MT5Service:
     def _record(self, expression: str, name: str) -> dict[str, Any]:
         result = self._eval(
             "(lambda row: dict(row._asdict()) if row is not None else None)"
-            f"({expression})"
+            f"({expression})",
         )
         if result is None:
             raise MT5ServiceError(f"{name} failed: {self.last_error()}")
@@ -120,7 +124,7 @@ class MT5Service:
         result = self._eval(
             "(lambda rows: [dict(row._asdict()) for row in rows] "
             "if rows is not None else None)"
-            f"({expression})"
+            f"({expression})",
         )
         if result is None:
             raise MT5ServiceError(f"{name} failed: {self.last_error()}")
@@ -145,7 +149,8 @@ class MT5Service:
     def tick(self, symbol: str) -> dict[str, Any]:
         self.symbol_info(symbol)
         tick = self._record(
-            f"mt5.symbol_info_tick({str.__repr__(symbol)})", "symbol_info_tick"
+            f"mt5.symbol_info_tick({str.__repr__(symbol)})",
+            "symbol_info_tick",
         )
         bid, ask = tick.get("bid"), tick.get("ask")
         if (
@@ -174,7 +179,11 @@ class MT5Service:
         raise MT5ServiceError("Unknown MT5 position type")
 
     def close_position(
-        self, ticket: int, settings: Settings, *, submit: bool = False
+        self,
+        ticket: int,
+        settings: Settings,
+        *,
+        submit: bool = False,
     ) -> dict[str, Any]:
         self._validate_settings(settings)
         if submit and not settings.ENABLE_TRADING:
@@ -203,11 +212,12 @@ class MT5Service:
             "type_filling": self.get_filling_mode(symbol),
             "comment": "FoxBot close",
         }
-        return self._checked_request(request, submit)
+        return self._checked_request(request, submit=submit)
 
     def deals_between(self, start: int, end: int) -> list[dict[str, Any]]:
         return self._records(
-            f"mt5.history_deals_get({int(start)}, {int(end)})", "history_deals_get"
+            f"mt5.history_deals_get({int(start)}, {int(end)})",
+            "history_deals_get",
         )
 
     def get_filling_mode(self, symbol: str) -> int:
@@ -223,7 +233,10 @@ class MT5Service:
 
     @staticmethod
     def _decimal(
-        value: float | Decimal, name: str, *, allow_zero: bool = False
+        value: float | Decimal,
+        name: str,
+        *,
+        allow_zero: bool = False,
     ) -> Decimal:
         try:
             number = Decimal(str(value))
@@ -231,7 +244,7 @@ class MT5Service:
             raise ValueError(f"{name} must be a valid number") from exc
         if not number.is_finite() or number < 0 or (number == 0 and not allow_zero):
             raise ValueError(
-                f"{name} must be {'nonnegative' if allow_zero else 'positive'}"
+                f"{name} must be {'nonnegative' if allow_zero else 'positive'}",
             )
         return number
 
@@ -326,19 +339,20 @@ class MT5Service:
         stamp = tick.get("time_msc")
         if type(stamp) is not int or stamp <= 0:
             raise MT5ServiceError(
-                f"MT5 returned no valid tick timestamp for {settings.MT5_SYMBOL}"
+                f"MT5 returned no valid tick timestamp for {settings.MT5_SYMBOL}",
             )
         quote_utc = stamp / 1000 - settings.mt5_quote_utc_offset_seconds
         age = time() - quote_utc
         if age < 0:
             raise MT5ServiceError(
-                f"MT5 quote for {settings.MT5_SYMBOL} is {-age:.2f}s ahead of the local clock. "
-                "Check clock synchronization and MT5_QUOTE_UTC_OFFSET_MINUTES"
+                f"MT5 quote for {settings.MT5_SYMBOL} is {-age:.2f}s ahead "
+                "of the local clock. "
+                "Check clock synchronization and MT5_QUOTE_UTC_OFFSET_MINUTES",
             )
         if age > settings.MAX_QUOTE_AGE_SECONDS:
             raise MT5ServiceError(
                 f"MT5 quote for {settings.MT5_SYMBOL} is stale ({age:.2f}s old, "
-                f"limit {settings.MAX_QUOTE_AGE_SECONDS}s)"
+                f"limit {settings.MAX_QUOTE_AGE_SECONDS}s)",
             )
         return tick
 
@@ -370,7 +384,7 @@ class MT5Service:
             status = "rejected"
         if status == "pending":
             raise MT5ServiceError(
-                f"Order has an uncertain result ({retcode}). Do not resend"
+                f"Order has an uncertain result ({retcode}). Do not resend",
             )
         if status == "rejected":
             reason = (
@@ -383,7 +397,11 @@ class MT5Service:
 
     @staticmethod
     def execute_market_order(
-        mt5: MT5Service, settings: Settings, order: MarketOrder, *, submit: bool = False
+        mt5: MT5Service,
+        settings: Settings,
+        order: MarketOrder,
+        *,
+        submit: bool = False,
     ) -> dict[str, Any]:
         """Check a manual order and optionally submit it once."""
         MT5Service._validate_settings(settings)
@@ -420,13 +438,16 @@ class MT5Service:
             "comment": "FoxBot",
         }
 
-        return mt5._checked_request(request, submit)
+        return mt5._checked_request(request, submit=submit)
 
-    def _checked_request(self, request: dict[str, Any], submit: bool) -> dict[str, Any]:
+    def _checked_request(
+        self, request: dict[str, Any], *, submit: bool
+    ) -> dict[str, Any]:
         def call(method: str) -> dict[str, Any]:
             result = self._eval(
-                "(lambda row: {k: v for k, v in row._asdict().items() if k != 'request'} "
-                f"if row is not None else None)(mt5.{method}({request!r}))"
+                "(lambda row: {k: v for k, v in row._asdict().items() "
+                "if k != 'request'} "
+                f"if row is not None else None)(mt5.{method}({request!r}))",
             )
             if result is None:
                 raise MT5ServiceError(f"{method} failed: {self.last_error()}")
@@ -442,7 +463,7 @@ class MT5Service:
             result = call("order_send")
         except MT5ServiceError as exc:
             raise MT5ServiceError(
-                "Order has an uncertain outcome. Do not resend"
+                "Order has an uncertain outcome. Do not resend",
             ) from exc
         return self._order_result(self, result)
 
