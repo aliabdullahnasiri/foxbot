@@ -269,8 +269,8 @@ def test_fixed_volume_order(execution, monkeypatch, side, price):
         login=45, server="Other", trade_mode=2
     )
     args = [
-        "mt5-order",
-        "--side",
+        "mt5",
+        "order",
         side,
         "--volume",
         "2",
@@ -319,3 +319,72 @@ def test_market_order_schema_rejects_invalid_fields(execution, changes):
     _, _, order = execution
     with pytest.raises(ValidationError):
         MarketOrder.model_validate(order.model_dump() | changes)
+
+
+@pytest.mark.parametrize("side", ["buy", "sell"])
+def test_nested_market_order(execution, monkeypatch, side):
+    bridge, settings, _ = execution
+    monkeypatch.setattr("bot.core.settings.get_settings", lambda: settings)
+    stop, target = ("2498", "2504") if side == "buy" else ("2504", "2498")
+    result = CliRunner().invoke(
+        main, ["mt5", "order", side, "--volume", "0.02", "--sl", stop, "--tp", target]
+    )
+    assert result.exit_code == 0, result.output
+    assert f"Preview {side} 0.02 lots" in result.output
+
+    bridge.allow_send = True
+    submitted = CliRunner().invoke(
+        main,
+        [
+            "mt5",
+            "order",
+            side,
+            "--volume",
+            "0.02",
+            "--sl",
+            stop,
+            "--tp",
+            target,
+            "--submit",
+        ],
+    )
+    assert submitted.exit_code == 0, submitted.output
+    bridge.remote.order_send.assert_called_once()
+
+
+@pytest.mark.parametrize("is_buy", [True, False])
+def test_list_and_close_position(execution, monkeypatch, is_buy):
+    bridge, settings, _ = execution
+    monkeypatch.setattr("bot.core.settings.get_settings", lambda: settings)
+    api = bridge.client
+    bridge.remote.positions_get.return_value = (
+        record(
+            ticket=42,
+            symbol=SYMBOL,
+            volume=0.02,
+            type=api.POSITION_TYPE_BUY if is_buy else api.POSITION_TYPE_SELL,
+        ),
+    )
+    runner = CliRunner()
+    args = ["mt5", "order"]
+    all_positions = runner.invoke(main, args + ["list"])
+    assert all_positions.exit_code == 0 and SYMBOL in all_positions.output
+    listed = runner.invoke(main, args + ["list", "--ticket", "42"])
+    assert listed.exit_code == 0 and SYMBOL in listed.output
+    for cell in ("Open positions", "Ticket", "Symbol", "Side", "Lots", "42", "0.02"):
+        assert cell in listed.output
+    empty = runner.invoke(main, args + ["list", "--ticket", "43"])
+    assert empty.exit_code == 0 and "No matching open positions." in empty.output
+    missing = runner.invoke(main, args + ["close", "43", "--submit"])
+    assert missing.exit_code == 1 and "43" in missing.output
+    preview = runner.invoke(main, args + ["close", "42"])
+    assert preview.exit_code == 0 and "Preview close 42" in preview.output
+    bridge.remote.order_send.assert_not_called()
+    bridge.allow_send = True
+    submitted = runner.invoke(main, args + ["close", "42", "--submit"])
+    assert submitted.exit_code == 0, submitted.output
+    request = bridge.remote.order_send.call_args.args[0]
+    assert request == bridge.remote.order_check.call_args.args[0]
+    assert request["position"] == 42 and request["volume"] == 0.02
+    assert request["type"] == (api.ORDER_TYPE_SELL if is_buy else api.ORDER_TYPE_BUY)
+    assert request["price"] == (2500 if is_buy else 2500.25)

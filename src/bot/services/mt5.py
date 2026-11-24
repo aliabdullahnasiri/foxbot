@@ -158,6 +158,53 @@ class MT5Service:
             raise MT5ServiceError(f"Invalid tick prices for {symbol}")
         return tick
 
+    def positions(self, symbol: str, ticket: int | None = None) -> list[dict[str, Any]]:
+        rows = self._records(f"mt5.positions_get(symbol={symbol!r})", "positions_get")
+        return [
+            row
+            for row in rows
+            if row["symbol"] == symbol and (ticket is None or row["ticket"] == ticket)
+        ]
+
+    def position_side(self, position_type: int) -> Literal["buy", "sell"]:
+        if position_type == self.mt5.POSITION_TYPE_BUY:
+            return "buy"
+        if position_type == self.mt5.POSITION_TYPE_SELL:
+            return "sell"
+        raise MT5ServiceError("Unknown MT5 position type")
+
+    def close_position(
+        self, ticket: int, settings: Settings, *, submit: bool = False
+    ) -> dict[str, Any]:
+        self._validate_settings(settings)
+        if submit and not settings.ENABLE_TRADING:
+            raise MT5ServiceError("Order submission requires ENABLE_TRADING=true")
+        symbol = settings.MT5_SYMBOL
+        rows = self.positions(symbol, ticket)
+        if len(rows) != 1:
+            raise MT5ServiceError(f"No unique open position {ticket} on {symbol}")
+        position = rows[0]
+        closing_buy = self.position_side(position["type"]) == "buy"
+        tick = self._quote(self, settings)
+        if Decimal(str(tick["ask"])) - Decimal(str(tick["bid"])) > settings.MAX_SPREAD:
+            raise MT5ServiceError("Spread exceeds MAX_SPREAD")
+        request = {
+            "action": self.mt5.TRADE_ACTION_DEAL,
+            "position": ticket,
+            "symbol": symbol,
+            "type": (
+                self.mt5.ORDER_TYPE_SELL if closing_buy else self.mt5.ORDER_TYPE_BUY
+            ),
+            "volume": self._volume(self.symbol_info(symbol), position["volume"]),
+            "price": tick["bid" if closing_buy else "ask"],
+            "magic": settings.MT5_MAGIC,
+            "deviation": self.deviation,
+            "type_time": self.mt5.ORDER_TIME_GTC,
+            "type_filling": self.get_filling_mode(symbol),
+            "comment": "FoxBot close",
+        }
+        return self._checked_request(request, submit)
+
     def deals_between(self, start: int, end: int) -> list[dict[str, Any]]:
         return self._records(
             f"mt5.history_deals_get({int(start)}, {int(end)})", "history_deals_get"
@@ -373,20 +420,21 @@ class MT5Service:
             "comment": "FoxBot",
         }
 
+        return mt5._checked_request(request, submit)
+
+    def _checked_request(self, request: dict[str, Any], submit: bool) -> dict[str, Any]:
         def call(method: str) -> dict[str, Any]:
-            result = mt5._eval(
+            result = self._eval(
                 "(lambda row: {k: v for k, v in row._asdict().items() if k != 'request'} "
                 f"if row is not None else None)(mt5.{method}({request!r}))"
             )
             if result is None:
-                raise MT5ServiceError(f"{method} failed: {mt5.last_error()}")
+                raise MT5ServiceError(f"{method} failed: {self.last_error()}")
             return result
 
         check = call("order_check")
         if check.get("retcode") != 0:
-            raise MT5ServiceError(
-                f"Broker order check failed: {check.get('comment')}"
-            )
+            raise MT5ServiceError(f"Broker order check failed: {check.get('comment')}")
         if not submit:
             return {"status": "dry_run", **request}
 
@@ -396,7 +444,7 @@ class MT5Service:
             raise MT5ServiceError(
                 "Order has an uncertain outcome. Do not resend"
             ) from exc
-        return MT5Service._order_result(mt5, result)
+        return self._order_result(self, result)
 
 
 execute_market_order = MT5Service.execute_market_order
