@@ -1,7 +1,6 @@
 import re
-from collections.abc import Awaitable
 from datetime import UTC, datetime, timedelta
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from telethon import events, types, utils
 
@@ -11,6 +10,9 @@ from bot.core.logger import logger
 from bot.core.ollama import OllamaError, extract_signal
 from bot.core.telegram import create_client
 from bot.workers.base import BaseWorker
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable
 
 SYMBOL = re.compile(r"\bXAUUSD\b", re.IGNORECASE)
 SIDE = re.compile(r"\b(?:BUY|SELL)\b", re.IGNORECASE)
@@ -34,7 +36,7 @@ class TelegramMonitorWorker(BaseWorker):
             user = await client.get_me()
             if user is None:
                 raise ValueError(
-                    "Telegram session is unauthorized. Run uv run bot telegram-login."
+                    "Telegram session is unauthorized. Run uv run bot telegram-login.",
                 )
             if not isinstance(user, types.User) or user.bot:
                 raise ValueError("Configure a Telegram user session.")
@@ -43,9 +45,9 @@ class TelegramMonitorWorker(BaseWorker):
             except ValueError:
                 if not channel.removeprefix("-").isdecimal():
                     raise ValueError(
-                        "TELEGRAM_CHANNEL could not be resolved."
+                        "TELEGRAM_CHANNEL could not be resolved.",
                     ) from None
-                # A fresh session may not have cached the access hash for a private channel.
+                # A fresh session may lack the access hash for a private channel.
                 target_id = int(channel)
                 if target_id > 0:
                     target_id = utils.get_peer_id(types.PeerChannel(target_id))
@@ -60,7 +62,7 @@ class TelegramMonitorWorker(BaseWorker):
                 or entity.left
             ):
                 raise ValueError(
-                    "TELEGRAM_CHANNEL must be a broadcast channel you joined."
+                    "TELEGRAM_CHANNEL must be a broadcast channel you joined.",
                 )
 
             channel_id = utils.get_peer_id(entity)
@@ -94,6 +96,6 @@ class TelegramMonitorWorker(BaseWorker):
 
             logger.info("Monitoring Telegram channel_id=%s", channel_id)
 
-            await cast(Awaitable[None], client.run_until_disconnected())
+            await cast("Awaitable[None]", client.run_until_disconnected())
         finally:
-            await cast(Awaitable[None], client.disconnect())
+            await cast("Awaitable[None]", client.disconnect())
