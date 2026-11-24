@@ -52,3 +52,15 @@ Manual order inputs now use the frozen Pydantic MarketOrder schema in bot.schema
 The packaged CLI provides `mt5 order buy|sell|list|close`, including checked full-position closes by ticket. Live terminal verification remains pending. The CLI package mirrors the public command tree in `core/cli/mt5/order.py`. All manual order commands now use the spaced `mt5 order` group. Position listings use a Rich table.
 
 The source and test trees pass `uv run ruff check src tests --select ALL` with repository-specific exceptions in `pyproject.toml`.
+
+Manual buy/sell orders support repeatable TP levels with foreground stop management. Demo terminal verification remains pending.
+
+Foreground stop management now identifies the open position directly from the opening order ticket. Mocked coverage includes unavailable deal history and a changed position ticket.
+
+Manual fills now display Rich receipts and exit-side quotes. The foreground stop monitor charts recent quotes and shows stop progress.
+
+Manual stop management now trails one level behind each intermediate TP, starting at the actual fill price when TP1 is reached.
+
+Manual buy and sell commands display a session order log alongside foreground stop monitoring.
+
+Foreground stop monitoring recovers from transient terminal IPC read failures, with bounded retries and original-account verification.
