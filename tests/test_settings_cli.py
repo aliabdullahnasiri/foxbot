@@ -21,7 +21,7 @@ def test_settings_load_mt5_credentials_from_dotenv(tmp_path, monkeypatch):
     for name in ("MT5_LOGIN", "MT5_PASSWORD", "MT5_SERVER"):
         monkeypatch.delenv(name, raising=False)
     (tmp_path / ".env").write_text(
-        "MT5_LOGIN=12345\nMT5_PASSWORD=test-mt5-password\nMT5_SERVER=Broker-Demo\n"
+        "MT5_LOGIN=12345\nMT5_PASSWORD=test-mt5-password\nMT5_SERVER=Broker-Demo\n",
     )
 
     settings = Settings()
