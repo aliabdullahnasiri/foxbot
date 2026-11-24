@@ -74,4 +74,4 @@ foxbot/
 ├── docs/
 └── tasks/
 ```
-Run `uv run bot --help` for CLI commands or `uv run uvicorn bot:main --factory` to serve `GET /health`. The foreground monitor logs schema-validated Ollama extractions. Telegram source verification and order execution are tracked in the backlog. Use `uv run bot mt5-order --help` for manual MT5 orders. [Implementation backlog](tasks/BACKLOG.md)
+Run `uv run bot --help` for CLI commands or `uv run uvicorn bot:main --factory` to serve `GET /health`. The foreground monitor logs schema-validated Ollama extractions. Telegram source verification and order execution are tracked in the backlog. Use `uv run bot mt5 order --help` for manual MT5 orders. [Implementation backlog](tasks/BACKLOG.md)
