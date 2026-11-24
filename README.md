@@ -37,3 +37,19 @@ Use `uv run bot mt5 order list` to see a table of position tickets, symbols, sid
 The installable package lives under `src/bot/`. The CLI, configuration, and external clients are under `core/`. Worker tasks live in `workers/`, HTTP routes in `api/`, signal schemas in `schemas/`, extraction prompts in `prompts/`, and the MT5 adapter in `services/`.  [Architecture](docs/ARCHITECTURE.md)
 
 Run `uv run ruff check .`, `uv run black .`, and `uv run pytest` for validation.
+
+For a stepped stop, repeat `--tp` in profit order, for example
+`uv run bot mt5 order buy --entry 2500 --tp 2504 --tp 2508 --tp 2512 --sl 2496 --volume 0.02 --submit`.
+The full volume stays open until a broker exit. The final TP and initial SL are attached on entry.
+Keep the command running for intermediate stop changes. It polls bid for buys and ask for sells,
+moving the stop one level behind the furthest observed intermediate target. TP1 moves the stop to the actual fill price, TP2 moves it to TP1, and later intermediate targets follow the same pattern. Each move must tighten the stop and satisfy broker stop and freeze distances.
+A brief crossing between polls can be missed. After interruption or a management error, check
+the position in MT5. The last broker-accepted SL and final TP remain active.
+
+If the CLI reports a fill followed by a monitoring error, inspect the existing position in MT5 before taking further action. Repeating the submit command places a new order.
+
+Submitted orders print a fill receipt. Single-target orders show the latest exit-side quote and return. During multi-target stop monitoring, the live table shows the bid for buys or ask for sells, the active stop, and the next TP trigger. The chart plots up to 40 observed quotes from oldest to newest, with the low and high shown below.
+
+Buy and sell commands display a UTC-timestamped order log. During stop monitoring it appears below the chart and records target triggers, broker-confirmed stop updates, and errors.
+
+If a monitor loses terminal IPC during a read, it logs up to three recovery attempts and verifies the original login, server, and position before continuing. Price crossings during the interruption may be missed. If recovery fails, inspect the existing position and its broker-held SL/TP in MT5.
