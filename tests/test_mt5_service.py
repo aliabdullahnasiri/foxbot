@@ -7,7 +7,7 @@ from unittest.mock import Mock
 import pytest
 from click.testing import CliRunner
 from mt5linux import MetaTrader5
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 
 from bot.core.cli import main
 from bot.core.settings import Settings
@@ -203,7 +203,8 @@ def test_tick_rejects_bad_prices(service, bridge, bid, ask):
 
 
 @pytest.fixture
-def execution(bridge, tmp_path):
+def execution(bridge, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     api = MetaTrader5
     remote = bridge.remote
     remote.account_info.return_value = record(
@@ -261,15 +262,14 @@ def execution(bridge, tmp_path):
         order=456,
     )
     settings = Settings(
-        _env_file=None,
         ENABLE_TRADING=True,
         ENABLE_REAL_TRADING=False,
         MT5_SYMBOL=SYMBOL,
         MT5_LOGIN=1234,
         MT5_SERVER="Broker",
-        MT5_PASSWORD="fixture-password",
-        MT5_SLIPPAGE_ALLOWANCE="0.25",
-        MT5_ROUND_TRIP_COST_PER_LOT="5",
+        MT5_PASSWORD=SecretStr("fixture-password"),
+        MT5_SLIPPAGE_ALLOWANCE=Decimal("0.25"),
+        MT5_ROUND_TRIP_COST_PER_LOT=Decimal(5),
     )
     order = MarketOrder(
         side="buy",
