@@ -64,3 +64,5 @@ Manual stop management now trails one level behind each intermediate TP, startin
 Manual buy and sell commands display a session order log alongside foreground stop monitoring.
 
 Foreground stop monitoring recovers from transient terminal IPC read failures, with bounded retries and original-account verification.
+
+The MT5 adapter splits target validation, monitor reads and recovery, and stop updates into focused methods for the full Ruff check.
