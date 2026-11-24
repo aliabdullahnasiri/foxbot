@@ -39,11 +39,11 @@ These price limits are **example configuration values**, not proven broker-safe 
 1. Install Python 3.12 and `uv`, then run `uv sync` from the repository root.
 2. Start Ollama at the configured URL and pull the configured model, for example with `ollama pull qwen2.5:3b`.
 3. Set your Telegram API credentials and channel. Run `uv run bot telegram-login` and then `uv run bot telegram-monitor`.
-4. Start with a demo terminal and run `uv run bot mt5-order --help`.
+4. Start with a demo terminal and run `uv run bot mt5 order --help`.
 
 ## Manual MT5 orders
 
-Use `uv run bot mt5-order --side sell --volume LOTS --sl STOP --tp TARGET`, replacing the placeholders with your lot size and prices. Buy orders use the ask and sell orders use the bid. Add `--entry PRICE` to set a reference for the entry deviation check.
+Use `uv run bot mt5 order sell --volume LOTS --sl STOP --tp TARGET`, replacing the placeholders with your lot size and prices. Buy orders use the ask and sell orders use the bid. Add `--entry PRICE` to set a reference for the entry deviation check.
 
 To submit, enable `ENABLE_TRADING=true` and add `--submit`. Each invocation can open a new position. Check the terminal before retrying an uncertain order.
 
