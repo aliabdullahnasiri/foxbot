@@ -9,7 +9,10 @@ class WorkerMeta(ABCMeta):
     """Register concrete worker classes with Celery."""
 
     def __new__(
-        mcls, name: str, bases: tuple[type, ...], namespace: dict[str, Any]
+        mcls,
+        name: str,
+        bases: tuple[type, ...],
+        namespace: dict[str, Any],
     ) -> type:
         cls = super().__new__(mcls, name, bases, namespace)
         if not isabstract(cls):
