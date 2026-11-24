@@ -13,3 +13,5 @@ Use this ordered checklist; update when work is completed. Keep the scope small.
 - [ ] **T10 Tests and documentation**: parser/risk/execution/state tests and README usage.
 
 Do not start a larger feature while the current milestone is incomplete.
+
+The packaged CLI provides `mt5 order buy|sell|list|close`, including checked full-position closes by ticket. Live terminal verification remains pending.
