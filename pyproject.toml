@@ -46,3 +46,21 @@ venvPath = "."
 venv = ".venv"
 include = ["src", "tests"]
 pythonVersion = "3.12"
+
+[tool.ruff.lint.pydocstyle]
+convention = "pep257"
+
+[tool.ruff.lint.per-file-ignores]
+# Keep Black's comma style, inline validation messages, and existing docstring coverage.
+"**/*.py" = ["COM812", "CPY001", "D", "EM101", "EM102", "TRY003"]
+# Pytest uses asserts, fixture injection, and inferred types.
+"tests/**" = ["ANN001", "ANN003", "ANN201", "ANN202", "INP001", "PLR2004", "S101"]
+"tests/test_mt5_service.py" = ["ARG001", "FBT003", "PYI024", "PT012", "S106", "S307"]
+"tests/test_telegram_worker.py" = ["SLF001"]
+# Preserve lazy entry-point imports and framework callback signatures.
+"src/bot/__init__.py" = ["PLC0415"]
+"src/bot/core/celery.py" = ["ARG001"]
+"src/bot/core/cli/**" = ["FBT001", "PLC0415", "PLR0913"]
+# Keep the MT5 adapter's public signatures and dynamic bridge response type.
+"src/bot/services/mt5.py" = ["ANN401", "PLR0913", "PLR2004", "SLF001", "TRY301"]
+"src/bot/workers/telegram.py" = ["C901"]
