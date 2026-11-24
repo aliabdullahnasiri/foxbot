@@ -26,6 +26,6 @@ class MarketOrder(BaseModel):
         )
         if not lower < self.entry < upper:
             raise ValueError(
-                "SL and TP must be on the correct sides of the intended entry"
+                "SL and TP must be on the correct sides of the intended entry",
             )
         return self
