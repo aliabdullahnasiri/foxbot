@@ -37,17 +37,19 @@ def connection() -> Iterator[tuple[MT5Service, Settings]]:
 
 def open_options[F: Callable](command: F) -> F:
     command = click.option("--volume", required=True, help="Position size in lots.")(
-        command
+        command,
     )
     command = click.option("--sl", required=True, help="Stop-loss price.")(command)
     command = click.option("--tp", required=True, help="Take-profit price.")(command)
     command = click.option(
-        "--entry", help="Optional reference price for entry deviation."
+        "--entry",
+        help="Optional reference price for entry deviation.",
     )(command)
-    command = click.option(
-        "--submit", is_flag=True, help="Submit the order. Default is dry run."
+    return click.option(
+        "--submit",
+        is_flag=True,
+        help="Submit the order. Default is dry run.",
     )(command)
-    return command
 
 
 def open_market_position(
@@ -56,6 +58,7 @@ def open_market_position(
     sl: str,
     tp: str,
     entry: str | None,
+    *,
     submit: bool,
 ) -> None:
     """Open a fixed-volume market position on the connected MT5 account."""
@@ -75,7 +78,7 @@ def open_market_position(
     else:
         click.echo(
             f"Preview {side} {volume} lots at {result['price']}, SL {sl}, TP {tp}. "
-            "To submit, add --submit."
+            "To submit, add --submit.",
         )
 
 
@@ -83,9 +86,13 @@ def register_side(side: Literal["buy", "sell"]) -> None:
     @order.command(side, help=f"Open a {side} market position.")
     @open_options
     def open_position(
-        volume: str, sl: str, tp: str, entry: str | None, submit: bool
+        volume: str,
+        sl: str,
+        tp: str,
+        entry: str | None,
+        submit: bool,
     ) -> None:
-        open_market_position(side, volume, sl, tp, entry, submit)
+        open_market_position(side, volume, sl, tp, entry, submit=submit)
 
 
 register_side("buy")
@@ -121,10 +128,10 @@ def close_position(ticket: int, submit: bool) -> None:
         result = service.close_position(ticket, settings, submit=submit)
     if submit:
         click.echo(
-            f"Close {result['status']} for ticket {ticket}, deal {result['deal']}"
+            f"Close {result['status']} for ticket {ticket}, deal {result['deal']}",
         )
     else:
         click.echo(
             f"Preview close {ticket}: {result['volume']} lots at {result['price']}. "
-            "To submit, add --submit."
+            "To submit, add --submit.",
         )
