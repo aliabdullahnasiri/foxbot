@@ -8,7 +8,7 @@ Python 3.12 and `uv` are required. The package uses Click, FastAPI, Telethon, Ce
 
 ## Application entry points
 
-- `uv run bot mt5-order --help` lists options for manual MT5 orders.
+- `uv run bot mt5 order --help` lists options for manual MT5 orders.
 - `uv run bot telegram-login` creates the local Telegram session.
 - `uv run bot telegram-monitor` runs the foreground Telegram task without a broker.
 - `uv run uvicorn bot:main --factory` serves the FastAPI liveness endpoint at `GET /health`.
