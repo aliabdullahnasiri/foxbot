@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import re
 from decimal import Decimal, InvalidOperation
+from itertools import pairwise
 from math import isfinite
-from time import time
+from time import sleep, time
 from typing import TYPE_CHECKING, Any, Literal, Self
 
 from mt5linux import MetaTrader5
@@ -14,11 +15,16 @@ from bot.core.settings import Settings, get_settings
 from bot.schemas.mt5.data.market_order import MarketOrder
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from types import TracebackType
 
 
 class MT5ServiceError(RuntimeError):
     """MT5 connection, validation, or API failure."""
+
+
+class MT5IPCError(MT5ServiceError):
+    """The terminal IPC connection failed during a broker read."""
 
 
 class MT5Service:
@@ -111,13 +117,19 @@ class MT5Service:
     def last_error(self) -> tuple[int, str]:
         return self._eval("mt5.last_error()")
 
+    def _read_error(self, name: str) -> MT5ServiceError:
+        error = self.last_error()
+        if error[0] in (-10001, -10002, -10003, -10004, -10005):
+            return MT5IPCError(f"{name} failed: {error}")
+        return MT5ServiceError(f"{name} failed: {error}")
+
     def _record(self, expression: str, name: str) -> dict[str, Any]:
         result = self._eval(
             "(lambda row: dict(row._asdict()) if row is not None else None)"
             f"({expression})",
         )
         if result is None:
-            raise MT5ServiceError(f"{name} failed: {self.last_error()}")
+            raise self._read_error(name)
         return result
 
     def _records(self, expression: str, name: str) -> list[dict[str, Any]]:
@@ -127,7 +139,7 @@ class MT5Service:
             f"({expression})",
         )
         if result is None:
-            raise MT5ServiceError(f"{name} failed: {self.last_error()}")
+            raise self._read_error(name)
         return result
 
     def account(self) -> dict[str, Any]:
@@ -270,6 +282,7 @@ class MT5Service:
         entry: float | Decimal | None = None,
         submit: bool = False,
         settings: Settings | None = None,
+        milestones: tuple[Decimal, ...] = (),
     ) -> dict[str, Any]:
         """Preview or submit an order. Use the supplied lot volume."""
         settings = settings or get_settings()
@@ -282,6 +295,7 @@ class MT5Service:
             entry=self._decimal(entry, "entry") if entry is not None else None,
             stop=self._decimal(sl, "sl"),
             target=self._decimal(tp, "tp"),
+            milestones=milestones,
             volume=self._decimal(volume, "volume"),
         )
         return self.execute_market_order(self, settings, order, submit=submit)
@@ -419,6 +433,31 @@ class MT5Service:
         ):
             raise MT5ServiceError("Price exceeds MAX_ENTRY_DEVIATION")
         info = mt5.symbol_info(settings.MT5_SYMBOL)
+        managed_account = None
+        if order.milestones:
+            levels = (price, *order.milestones, order.target)
+            for previous, current in pairwise(levels):
+                if current <= previous if order.side == "buy" else current >= previous:
+                    raise ValueError(
+                        "Targets must progress from market price in profit order"
+                    )
+            if order.entry is not None and (
+                order.milestones[0] <= order.entry
+                if order.side == "buy"
+                else order.milestones[0] >= order.entry
+            ):
+                raise ValueError("First target must be beyond intended entry")
+            account = mt5.account()
+            if submit:
+                managed_account = mt5._account_identity(account)
+            if account[
+                "margin_mode"
+            ] != mt5.mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING and mt5.positions(
+                settings.MT5_SYMBOL
+            ):
+                raise MT5ServiceError(
+                    "A netting account needs a flat symbol for a managed order"
+                )
         request = {
             "action": mt5.mt5.TRADE_ACTION_DEAL,
             "symbol": settings.MT5_SYMBOL,
@@ -438,7 +477,139 @@ class MT5Service:
             "comment": "FoxBot",
         }
 
-        return mt5._checked_request(request, submit=submit)
+        result = mt5._checked_request(request, submit=submit)
+        if managed_account is not None:
+            result["managed_account"] = managed_account
+        return result
+
+    @staticmethod
+    def _account_identity(account: dict[str, Any]) -> tuple[int, str]:
+        login, server = account.get("login"), account.get("server")
+        if (
+            type(login) is not int
+            or login <= 0
+            or not isinstance(server, str)
+            or not server
+        ):
+            raise MT5ServiceError("Cannot identify the account for managed stops")
+        return login, server
+
+    def trail_targets(
+        self,
+        result: dict[str, Any],
+        side: str,
+        targets: tuple[Decimal, ...],
+        settings: Settings,
+        *,
+        on_quote: Callable[[Decimal, Decimal, Decimal | None], None] | None = None,
+        on_event: Callable[[str, str], None] | None = None,
+    ) -> None:
+        """Advance the broker stop on the position created by this opening deal."""
+        deal = int(result["deal"])
+        order_ticket = result.get("order")
+        if type(order_ticket) is not int or order_ticket <= 0:
+            raise MT5ServiceError(
+                f"Missing opening order ticket for deal {deal}. Inspect MT5"
+            )
+        fill = self._decimal(result.get("price", 0), "MT5 fill price")
+        pending = list(pairwise((fill, *targets[:-1])))
+        symbol = settings.MT5_SYMBOL
+        buy = side == "buy"
+        monitoring = False
+        failures = 0
+        while pending:
+            try:
+                if failures:
+                    sleep(failures)
+                    # Restore the native terminal IPC session on the existing bridge.
+                    if not self._eval("mt5.initialize(timeout=5000)"):
+                        raise self._read_error("initialize")
+                    if self._account_identity(self.account()) != result.get(
+                        "managed_account"
+                    ):
+                        raise MT5ServiceError(
+                            "Account changed. Inspect the original position in MT5"
+                        )
+                rows = [
+                    p for p in self.positions(symbol) if p["identifier"] == order_ticket
+                ]
+                if rows:
+                    tick = self._quote(self, settings)
+                    info = self.symbol_info(symbol)
+            except MT5IPCError as exc:
+                if failures >= 3:
+                    raise MT5ServiceError(
+                        f"Terminal IPC recovery failed for deal {deal}. Inspect MT5. {exc}"
+                    ) from exc
+                failures += 1
+                if on_event:
+                    on_event(
+                        "Reconnecting",
+                        f"Terminal IPC unavailable (attempt {failures}/3)",
+                    )
+                continue
+            if failures and on_event:
+                on_event(
+                    "Reconnected",
+                    "Verified original account and refreshed position data",
+                )
+            failures = 0
+            if not rows and monitoring:
+                if on_event is not None:
+                    on_event(
+                        "Position closed", f"Position {order_ticket} is no longer open"
+                    )
+                return
+            if len(rows) != 1:
+                raise MT5ServiceError(
+                    f"Cannot identify open position for filled deal {deal}. Inspect MT5"
+                )
+            position = rows[0]
+            monitoring = True
+            if (
+                self.position_side(position["type"]) != side
+                or position["magic"] != settings.MT5_MAGIC
+                or Decimal(str(position["tp"])) != targets[-1]
+            ):
+                raise MT5ServiceError("Position changed during stop management")
+            price = Decimal(str(tick["bid" if buy else "ask"]))
+            distance = Decimal(str(info["point"])) * max(
+                info["trade_stops_level"], info["trade_freeze_level"]
+            )
+            stop = Decimal(str(position["sl"]))
+            eligible = [
+                (index, new_stop)
+                for index, (new_stop, trigger) in enumerate(pending)
+                if (price >= trigger if buy else price <= trigger)
+                and (price - new_stop if buy else new_stop - price) > distance
+            ]
+            if eligible:
+                index, target = eligible[-1]
+                if on_event is not None:
+                    on_event(
+                        "Target reached",
+                        f"Trigger {pending[index][1]} at quote {price}",
+                    )
+                if stop == 0 or (target > stop if buy else target < stop):
+                    self._checked_request(
+                        {
+                            "action": self.mt5.TRADE_ACTION_SLTP,
+                            "symbol": symbol,
+                            "position": position["ticket"],
+                            "sl": float(target),
+                            "tp": float(targets[-1]),
+                            "magic": settings.MT5_MAGIC,
+                        },
+                        submit=True,
+                    )
+                    if on_event is not None:
+                        on_event("Stop updated", f"Broker accepted SL {target}")
+                    stop = target
+                pending = pending[index + 1 :]
+            if on_quote is not None:
+                on_quote(price, stop, pending[0][1] if pending else None)
+            if pending:
+                sleep(0.25)
 
     def _checked_request(
         self, request: dict[str, Any], *, submit: bool
@@ -465,6 +636,11 @@ class MT5Service:
             raise MT5ServiceError(
                 "Order has an uncertain outcome. Do not resend",
             ) from exc
+        if (
+            request["action"] == self.mt5.TRADE_ACTION_SLTP
+            and result.get("retcode") == self.mt5.TRADE_RETCODE_DONE
+        ):
+            return result
         return self._order_result(self, result)
 
 
