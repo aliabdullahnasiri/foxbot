@@ -15,6 +15,7 @@ class MarketOrder(BaseModel):
     entry: PositiveDecimal | None
     stop: PositiveDecimal
     target: PositiveDecimal
+    milestones: tuple[PositiveDecimal, ...] = ()
     volume: PositiveDecimal
 
     @model_validator(mode="after")
