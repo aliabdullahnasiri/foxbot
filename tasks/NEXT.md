@@ -48,3 +48,5 @@ MT5 settings tests use a temporary working directory and the standard settings c
 The manual MT5 command opens fixed-volume market positions on the connected account. It supports previews, broker order checks. Account eligibility and portfolio risk checks apply to the planned Telegram execution work. Windows terminal verification remains pending.
 
 Manual order inputs now use the frozen Pydantic MarketOrder schema in bot.schemas.mt5.data.market_order. MT5Service owns the order execution helpers.
+
+The packaged CLI provides `mt5 order buy|sell|list|close`, including checked full-position closes by ticket. Live terminal verification remains pending. The CLI package mirrors the public command tree in `core/cli/mt5/order.py`. All manual order commands now use the spaced `mt5 order` group. Position listings use a Rich table.
