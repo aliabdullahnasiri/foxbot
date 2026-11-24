@@ -372,6 +372,10 @@ def test_nested_market_order(execution, monkeypatch, side):
         ],
     )
     assert submitted.exit_code == 0, submitted.output
+    assert "Fill price" in submitted.output
+    assert (
+        "Latest bid  2500" if side == "buy" else "Latest ask  2500.25"
+    ) in submitted.output
     bridge.remote.order_send.assert_called_once()
 
 
@@ -417,3 +421,163 @@ def test_list_and_close_position(execution, monkeypatch, is_buy):
     assert request["volume"] == 0.02
     assert request["type"] == (api.ORDER_TYPE_SELL if is_buy else api.ORDER_TYPE_BUY)
     assert request["price"] == (2500 if is_buy else 2500.25)
+
+
+@pytest.mark.parametrize("side", ["buy", "sell"])
+@pytest.mark.parametrize("gap", [False, True])
+def test_multiple_targets_move_stop(execution, monkeypatch, side, gap):
+    bridge, settings, _ = execution
+    remote = bridge.remote
+    buy = side == "buy"
+    first, final = (2504, 2510) if buy else (2496, 2490)
+    remote.account_info.return_value = record(
+        login=1234,
+        server="Broker",
+        margin_mode=bridge.client.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,
+    )
+    remote.history_deals_get.return_value = None
+    remote.positions_get.return_value = (
+        record(
+            symbol=SYMBOL,
+            ticket=789,
+            identifier=456,
+            magic=settings.MT5_MAGIC,
+            sl=2490 if buy else 2510,
+            tp=final,
+            type=(
+                bridge.client.POSITION_TYPE_BUY
+                if buy
+                else bridge.client.POSITION_TYPE_SELL
+            ),
+        ),
+    )
+    if gap:
+        remote.initialize = Mock(return_value=True)
+        remote.last_error.return_value = (-10004, "No IPC connection")
+        positions = remote.positions_get.return_value
+        remote.positions_get.side_effect = [positions, None, positions]
+    second = first + 2 if buy else first - 2
+    fill = 2500.25 if buy else 2500
+    fill_result = record(
+        retcode=bridge.client.TRADE_RETCODE_DONE, deal=123, order=456, price=fill
+    )
+    triggers = [second] if gap else [first, second]
+    remote.symbol_info_tick.side_effect = [
+        remote.symbol_info_tick.return_value,
+        remote.symbol_info_tick.return_value,
+        *[
+            record(
+                bid=t if buy else t - 0.25,
+                ask=t + 0.25 if buy else t,
+                time_msc=int(time() * 1000),
+            )
+            for t in triggers
+        ],
+    ]
+    remote.order_send.side_effect = [
+        fill_result,
+        *[record(retcode=bridge.client.TRADE_RETCODE_DONE, deal=0) for _ in triggers],
+    ]
+    bridge.allow_send = True
+    monkeypatch.setattr("bot.core.settings.get_settings", lambda: settings)
+    args = [
+        "mt5",
+        "order",
+        side,
+        "--volume",
+        "0.02",
+        "--sl",
+        str(2490 if buy else 2510),
+        "--tp",
+        str(first),
+        "--tp",
+        str(second),
+        "--tp",
+        str(final),
+        "--submit",
+    ]
+    monkeypatch.setattr(mt5, "sleep", lambda _: None)
+    result = CliRunner().invoke(main, args)
+    assert result.exit_code == 0, result.output
+    assert ("Current bid" if buy else "Current ask") in result.output
+    assert "Order log" in result.output
+    assert result.output.count("Stop updated") == len(triggers)
+    assert result.output.count("Target reached") == len(triggers)
+    assert "Finished" in result.output
+    assert "Recent quotes" in result.output
+    assert "Complete" in result.output
+    if gap:
+        assert "Reconnecting" in result.output
+        assert "Reconnected" in result.output
+        remote.initialize.assert_called_once_with(timeout=5000)
+    opening, *changes = [call.args[0] for call in remote.order_send.call_args_list]
+    assert [change["sl"] for change in changes] == ([first] if gap else [fill, first])
+    modification = changes[-1]
+    assert opening["tp"] == final
+    remote.history_deals_get.assert_not_called()
+    assert modification["position"] == 789
+    assert modification["action"] == bridge.client.TRADE_ACTION_SLTP
+    assert modification["sl"] == first
+    assert modification["tp"] == final
+    assert remote.order_check.call_count == 1 + len(triggers)
+
+
+def test_stop_management_requires_matching_identifier(service, execution):
+    bridge, settings, _ = execution
+    bridge.remote.positions_get.return_value = (
+        record(symbol=SYMBOL, ticket=456, identifier=999),
+    )
+    with pytest.raises(MT5ServiceError, match="Cannot identify open position"):
+        service.trail_targets(
+            {"deal": 123, "order": 456, "price": 2500},
+            "sell",
+            (Decimal(2496), Decimal(2490)),
+            settings,
+        )
+
+
+def test_cli_logs_check_failure(execution, monkeypatch):
+    bridge, settings, _ = execution
+    monkeypatch.setattr("bot.core.settings.get_settings", lambda: settings)
+    bridge.remote.order_check.return_value = record(retcode=1, comment="invalid stops")
+    result = CliRunner().invoke(
+        main,
+        [
+            "mt5",
+            "order",
+            "buy",
+            "--sl",
+            "2490",
+            "--tp",
+            "2510",
+            "--volume",
+            "0.02",
+            "--submit",
+        ],
+    )
+    assert result.exit_code == 1
+    assert "Order log" in result.output
+    assert "invalid stops" in result.output
+    assert "Filled" not in result.output
+
+
+@pytest.mark.parametrize("restored", [True, False])
+def test_stop_monitor_recovery_fails_closed(service, execution, monkeypatch, restored):
+    bridge, settings, _ = execution
+    remote = bridge.remote
+    remote.positions_get.return_value = None
+    remote.last_error.return_value = (-10004, "No IPC connection")
+    remote.initialize = Mock(return_value=restored)
+    monkeypatch.setattr(mt5, "sleep", lambda _: None)
+    fill = {
+        "deal": 123,
+        "order": 456,
+        "price": 2500,
+        "managed_account": (1234, "Other broker"),
+    }
+    with pytest.raises(
+        MT5ServiceError, match="Account changed" if restored else "recovery failed"
+    ):
+        service.trail_targets(fill, "sell", (Decimal(2496), Decimal(2490)), settings)
+    assert remote.initialize.call_count == (1 if restored else 3)
+    remote.order_check.assert_not_called()
