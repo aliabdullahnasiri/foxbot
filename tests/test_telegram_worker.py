@@ -30,7 +30,7 @@ def client(monkeypatch, tmp_path):
             photo=types.ChatPhotoEmpty(),
             date=None,
             broadcast=True,
-        )
+        ),
     )
     fake.run_until_disconnected = AsyncMock()
     monkeypatch.setattr("bot.workers.telegram.create_client", lambda: fake)
@@ -47,7 +47,7 @@ async def test_monitor_logs_only_fresh_candidates(client, caplog, monkeypatch):
     monkeypatch.setattr("bot.workers.telegram.datetime", clock)
     caplog.set_level(logging.INFO)
     extract = AsyncMock(
-        side_effect=OllamaError("Ollama output failed signal validation.")
+        side_effect=OllamaError("Ollama output failed signal validation."),
     )
     monkeypatch.setattr("bot.workers.telegram.extract_signal", extract)
 
@@ -55,7 +55,8 @@ async def test_monitor_logs_only_fresh_candidates(client, caplog, monkeypatch):
         builder = client.on.call_args.args[0]
         assert isinstance(builder, events.NewMessage)
         assert builder.chats == channel_id
-        assert builder.incoming is None and builder.outgoing is None
+        assert builder.incoming is None
+        assert builder.outgoing is None
         for outgoing in (False, True):
             assert (
                 builder.build(
@@ -69,7 +70,7 @@ async def test_monitor_logs_only_fresh_candidates(client, caplog, monkeypatch):
                         ),
                         pts=1,
                         pts_count=1,
-                    )
+                    ),
                 )
                 is not None
             )
@@ -83,7 +84,7 @@ async def test_monitor_logs_only_fresh_candidates(client, caplog, monkeypatch):
             (6, channel_id, "XAUUSD BUY 3500", now + timedelta(seconds=1)),
         ]:
             await handler(
-                SimpleNamespace(id=message_id, chat_id=chat, raw_text=text, date=date)
+                SimpleNamespace(id=message_id, chat_id=chat, raw_text=text, date=date),
             )
 
     client.run_until_disconnected.side_effect = dispatch
@@ -94,7 +95,7 @@ async def test_monitor_logs_only_fresh_candidates(client, caplog, monkeypatch):
         record.message for record in caplog.records if "candidate" in record.message
     ]
     assert candidates == [
-        f"Telegram signal candidate channel_id={channel_id} message_id=1"
+        f"Telegram signal candidate channel_id={channel_id} message_id=1",
     ]
     client.disconnect.assert_awaited_once()
 
