@@ -17,5 +17,5 @@ def require_broker(sender: WorkController, **kwargs: object) -> None:
     if sender.app is celery_app and not celery_app.conf.broker_read_url:
         raise SystemExit(
             "FoxBot needs CELERY_BROKER_URL to start a queue worker. "
-            "For Telegram monitoring, run uv run bot telegram-monitor."
+            "For Telegram monitoring, run uv run bot telegram-monitor.",
         )
