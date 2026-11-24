@@ -14,4 +14,6 @@ Use this ordered checklist; update when work is completed. Keep the scope small.
 
 Do not start a larger feature while the current milestone is incomplete.
 
-The packaged CLI provides `mt5 order buy|sell|list|close`, including checked full-position closes by ticket. Live terminal verification remains pending.
+The packaged CLI provides `mt5 order buy|sell|list|close`, including checked full-position closes by ticket. Manual buy and sell orders support repeated TP levels and foreground stop adjustments. Live terminal verification remains pending.
+
+Manual stop management now trails one level behind each intermediate TP, starting at the actual fill price when TP1 is reached.
