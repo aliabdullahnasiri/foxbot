@@ -1,9 +1,11 @@
-from collections.abc import Awaitable
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from telethon import TelegramClient, types
 
 from bot.core import config
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable
 
 
 def positive_int(name: str, value: str) -> int:
@@ -31,9 +33,9 @@ async def sign_in() -> None:
     # These Telethon methods return awaitables inside a running event loop.
     client = create_client()
     try:
-        await cast(Awaitable[TelegramClient], client.start())
+        await cast("Awaitable[TelegramClient]", client.start())
         user = await client.get_me()
         if not isinstance(user, types.User) or user.bot:
             raise ValueError("Configure a Telegram user session.")
     finally:
-        await cast(Awaitable[None], client.disconnect())
+        await cast("Awaitable[None]", client.disconnect())
